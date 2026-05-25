@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: argos-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-argos_clinical}
+      POSTGRES_USER: ${POSTGRES_USER:-argos_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argos_app_local}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - argos-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../Argos-Backend
+      target: development
+    container_name: argos-backend
+    environment:
+      SERVER_PORT: 8080
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-argos_clinical}
+      DB_USERNAME: ${POSTGRES_USER:-argos_app}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-argos_app_local}
+      DB_MIGRATIONS_ENABLED: ${DB_MIGRATIONS_ENABLED:-true}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-http://localhost:5173}
+      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-argosclinical@gmail.com}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-argosclinical@gmail.com}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-true}
+      MAIL_SMTP_STARTTLS_ENABLE: ${MAIL_SMTP_STARTTLS_ENABLE:-true}
+      EMAIL_VERIFICATION_EXPIRATION_HOURS: ${EMAIL_VERIFICATION_EXPIRATION_HOURS:-24}
+      JWT_SECRET: ${JWT_SECRET:-argos-clinical-local-dev-secret-32-bytes-minimum}
+      JWT_EXPIRATION_HOURS: ${JWT_EXPIRATION_HOURS:-24}
+      JWT_ISSUER: ${JWT_ISSUER:-argos-clinical}
+      LOGIN_MAX_FAILED_ATTEMPTS: ${LOGIN_MAX_FAILED_ATTEMPTS:-5}
+      LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - ../Argos-Backend:/app
+      - argos-maven-cache:/root/.m2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../Argos-Frontend
+      target: development
+    container_name: argos-frontend
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+      VITE_APP_ENV: ${VITE_APP_ENV:-development}
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ../Argos-Frontend:/app
+      - argos-frontend-node-modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  argos-postgres-data:
+  argos-maven-cache:
+  argos-frontend-node-modules:
