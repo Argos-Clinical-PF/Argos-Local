@@ -48,6 +48,12 @@ MAIL_PASSWORD=COMPLETAR_APP_PASSWORD_DE_GMAIL
 
 No commitear `.env`: puede contener contrasenas o secretos locales.
 
+En el `docker-compose.yml`, el servicio `backend` debe cargar ese archivo:
+
+```yaml
+env_file:
+  - .env
+```
 ## Levantar la app
 
 Desde `Argos-Local`:
