@@ -22,6 +22,8 @@ services:
       context: ../Argos-Backend
       target: development
     container_name: argos-backend
+    env_file:
+      - .env 
     environment:
       SERVER_PORT: 8080
       APP_VERSION: ${APP_VERSION:-0.1.0}
