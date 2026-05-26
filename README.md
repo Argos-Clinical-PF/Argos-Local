@@ -125,3 +125,45 @@ Por eso `Argos-Local` debe mantenerse como carpeta hermana de ambos repos.
 - No agregar `/api` a `VITE_API_BASE_URL`, porque el frontend ya usa rutas como `/api/auth/register`.
 - `JWT_SECRET` debe tener al menos 32 bytes para HS256.
 - Para Gmail se recomienda usar una App Password. En produccion puede convenir migrar a un proveedor transaccional como Brevo, SendGrid, Amazon SES o Mailgun.
+
+
+## Persistencia de la base de datos
+
+PostgreSQL guarda sus datos en un volumen Docker llamado `argos-postgres-data`.
+
+Esto permite que la base de datos conserve su información aunque se detengan o reinicien los contenedores.
+
+Comandos seguros:
+
+```bash
+docker compose down
+docker compose stop
+docker compose up -d
+```
+
+Estos comandos no eliminan la base de datos.
+
+Comando peligroso:
+
+```bash
+docker compose down -v
+```
+
+Este comando elimina los volúmenes asociados al proyecto y puede borrar la base de datos local.
+
+También evitar borrar manualmente el volumen `argos-postgres-data` desde Docker Desktop o mediante comandos como:
+
+```bash
+docker volume rm argos-postgres-data
+docker volume prune
+```
+
+Para desarrollo local esta configuración es suficiente, pero si se necesita conservar información importante, se recomienda hacer backups/exportaciones de la base de datos.
+
+Ejemplo de exportación manual:
+
+```bash
+docker exec -t argos-postgres pg_dump -U argos_app argos_clinical > backup.sql
+```
+
+En resumen: mientras no se use `docker compose down -v` ni se elimine manualmente el volumen, la base de datos debería persistir correctamente.
