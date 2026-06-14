@@ -58,10 +58,12 @@ jobs:
           ESTADO=$(aws ec2 describe-instances --instance-ids "${{ steps.aws.outputs.instance_id }}" \
             --query 'Reservations[0].Instances[0].State.Name' --output text)
           if [ "$ESTADO" = "running" ]; then
+            PARAMETERS=$(jq -cn --arg region "$AWS_REGION" \
+              '{commands:["AWS_REGION=\($region) /home/ec2-user/argos/backup-postgres.sh"]}')
             COMMAND_ID=$(aws ssm send-command \
               --instance-ids "${{ steps.aws.outputs.instance_id }}" \
               --document-name AWS-RunShellScript \
-              --parameters commands="AWS_REGION=${AWS_REGION} /home/ec2-user/argos/backup-postgres.sh" \
+              --parameters "$PARAMETERS" \
               --query 'Command.CommandId' --output text)
             aws ssm wait command-executed \
               --command-id "$COMMAND_ID" \

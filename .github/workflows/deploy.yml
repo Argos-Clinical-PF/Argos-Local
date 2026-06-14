@@ -94,10 +94,25 @@ jobs:
           TRANSCRIPCION_TAG: ${{ inputs.transcripcion_tag || 'main' }}
         run: |
           PREFIX="s3://${{ steps.aws.outputs.bucket }}/deploy/${GITHUB_SHA}"
+          PARAMETERS=$(jq -cn \
+            --arg prefix "$PREFIX" \
+            --arg region "$AWS_REGION" \
+            --arg backend "$BACKEND_TAG" \
+            --arg frontend "$FRONTEND_TAG" \
+            --arg transcripcion "$TRANSCRIPCION_TAG" \
+            '{commands:[
+              "mkdir -p /home/ec2-user/argos",
+              "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/docker-compose.prod.yml",
+              "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/Caddyfile",
+              "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh",
+              "aws s3 cp \($prefix)/backup-postgres.sh /home/ec2-user/argos/backup-postgres.sh",
+              "chmod 700 /home/ec2-user/argos/*.sh",
+              "AWS_REGION=\($region) BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) /home/ec2-user/argos/deploy-mvp.sh"
+            ]}')
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "${{ steps.aws.outputs.instance_id }}" \
             --document-name AWS-RunShellScript \
-            --parameters commands="mkdir -p /home/ec2-user/argos,aws s3 cp $PREFIX/docker-compose.prod.yml /home/ec2-user/argos/docker-compose.prod.yml,aws s3 cp $PREFIX/Caddyfile /home/ec2-user/argos/Caddyfile,aws s3 cp $PREFIX/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh,aws s3 cp $PREFIX/backup-postgres.sh /home/ec2-user/argos/backup-postgres.sh,chmod 700 /home/ec2-user/argos/*.sh,AWS_REGION=${AWS_REGION} BACKEND_TAG=${BACKEND_TAG} FRONTEND_TAG=${FRONTEND_TAG} TRANSCRIPCION_TAG=${TRANSCRIPCION_TAG} /home/ec2-user/argos/deploy-mvp.sh" \
+            --parameters "$PARAMETERS" \
             --query 'Command.CommandId' --output text)
           echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
           for intento in $(seq 1 180); do
