@@ -40,6 +40,10 @@ umask 077
   printf 'WHISPER_DEVICE=cpu\n'
   printf 'WHISPER_COMPUTE_TYPE=int8\n'
   printf 'WHISPER_IDIOMA=es\n'
+  # Nota clinica (Epica 5). Si el parametro no existe, se escribe vacio: el backend
+  # devuelve 503 claro en vez de romper el deploy.
+  printf 'ANTHROPIC_API_KEY=%s\n' "$(get_parameter anthropic-api-key 2>/dev/null || true)"
+  printf 'ANTHROPIC_MODEL=claude-sonnet-4-6\n'
 } > .env
 
 aws ecr get-login-password --region "$REGION" \
