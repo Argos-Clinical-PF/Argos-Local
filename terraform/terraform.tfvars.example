@@ -1,0 +1,4 @@
+# Copiar a terraform.tfvars solamente si se necesita cambiar defaults.
+profile       = "argos-facu"
+region        = "us-east-1"
+instance_type = "t3.large"

@@ -32,6 +32,7 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-argos_app_local}
       DB_MIGRATIONS_ENABLED: ${DB_MIGRATIONS_ENABLED:-true}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      TRANSCRIPCION_SERVICE_URL: ${TRANSCRIPCION_SERVICE_URL:-http://transcripcion:9000}
       APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-http://localhost:5173}
       MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
       MAIL_PORT: ${MAIL_PORT:-587}
@@ -54,6 +55,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      transcripcion:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -79,6 +82,19 @@ services:
     depends_on:
       backend:
         condition: service_started
+    restart: unless-stopped
+
+  transcripcion:
+    build:
+      context: ../Argos-Entrenamiento/servicio-transcripcion
+    container_name: argos-transcripcion
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-medium}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
+    ports:
+      - "${TRANSCRIPCION_PORT:-9000}:9000"
     restart: unless-stopped
 
 volumes:

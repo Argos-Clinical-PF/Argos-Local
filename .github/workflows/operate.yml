@@ -1,0 +1,76 @@
+name: Operate MVP
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Operacion
+        required: true
+        type: choice
+        options:
+          - start
+          - stop
+          - status
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ROLE_ARN: arn:aws:iam::915093573341:role/argos-github-actions
+
+jobs:
+  operate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Descubrir instancia
+        id: aws
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters Name=tag:Name,Values=argos-app Name=instance-state-name,Values=pending,running,stopping,stopped \
+            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+          PUBLIC_IP=$(aws ec2 describe-addresses \
+            --filters Name=tag:Name,Values=argos-eip \
+            --query 'Addresses[0].PublicIp' --output text)
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+          echo "url=https://${PUBLIC_IP//./-}.sslip.io" >> "$GITHUB_OUTPUT"
+
+      - name: Iniciar
+        if: inputs.action == 'start'
+        run: |
+          aws ec2 start-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
+          aws ec2 wait instance-status-ok --instance-ids "${{ steps.aws.outputs.instance_id }}"
+          for intento in $(seq 1 30); do
+            curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/api/health" && exit 0
+            sleep 10
+          done
+          exit 1
+
+      - name: Backup y detener
+        if: inputs.action == 'stop'
+        run: |
+          ESTADO=$(aws ec2 describe-instances --instance-ids "${{ steps.aws.outputs.instance_id }}" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text)
+          if [ "$ESTADO" = "running" ]; then
+            COMMAND_ID=$(aws ssm send-command \
+              --instance-ids "${{ steps.aws.outputs.instance_id }}" \
+              --document-name AWS-RunShellScript \
+              --parameters commands="AWS_REGION=${AWS_REGION} /home/ec2-user/argos/backup-postgres.sh" \
+              --query 'Command.CommandId' --output text)
+            aws ssm wait command-executed \
+              --command-id "$COMMAND_ID" \
+              --instance-id "${{ steps.aws.outputs.instance_id }}"
+            aws ec2 stop-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
+          fi
+
+      - name: Estado
+        run: |
+          aws ec2 describe-instances --instance-ids "${{ steps.aws.outputs.instance_id }}" \
+            --query 'Reservations[0].Instances[0].{Estado:State.Name,IP:PublicIpAddress}' --output table
+          echo "URL: ${{ steps.aws.outputs.url }}"
