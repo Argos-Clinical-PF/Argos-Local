@@ -1,0 +1,141 @@
+name: Deploy MVP
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_tag:
+        description: Tag de argos-backend
+        required: true
+        default: main
+      frontend_tag:
+        description: Tag de argos-frontend
+        required: true
+        default: main
+      transcripcion_tag:
+        description: Tag de argos-transcripcion
+        required: true
+        default: main
+      stop_after:
+        description: Detener EC2 despues de validar
+        required: true
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - Caddyfile
+      - docker-compose.prod.yml
+      - scripts/**
+      - .github/workflows/deploy.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ROLE_ARN: arn:aws:iam::915093573341:role/argos-github-actions
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS mediante OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Descubrir recursos
+        id: aws
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters Name=tag:Name,Values=argos-app Name=instance-state-name,Values=pending,running,stopping,stopped \
+            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+          BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'argos-mvp-operacion-')].Name | [0]" --output text)
+          PUBLIC_IP=$(aws ec2 describe-addresses \
+            --filters Name=tag:Name,Values=argos-eip \
+            --query 'Addresses[0].PublicIp' --output text)
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+          echo "url=https://${PUBLIC_IP//./-}.sslip.io" >> "$GITHUB_OUTPUT"
+
+      - name: Publicar bundle de despliegue
+        run: |
+          PREFIX="s3://${{ steps.aws.outputs.bucket }}/deploy/${GITHUB_SHA}"
+          aws s3 cp docker-compose.prod.yml "$PREFIX/docker-compose.prod.yml"
+          aws s3 cp Caddyfile "$PREFIX/Caddyfile"
+          aws s3 cp scripts/deploy-mvp.sh "$PREFIX/deploy-mvp.sh"
+          aws s3 cp scripts/backup-postgres.sh "$PREFIX/backup-postgres.sh"
+
+      - name: Iniciar EC2
+        run: |
+          aws ec2 start-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
+          aws ec2 wait instance-status-ok --instance-ids "${{ steps.aws.outputs.instance_id }}"
+
+      - name: Esperar Systems Manager
+        run: |
+          for intento in $(seq 1 30); do
+            ESTADO=$(aws ssm describe-instance-information \
+              --filters Key=InstanceIds,Values=${{ steps.aws.outputs.instance_id }} \
+              --query 'InstanceInformationList[0].PingStatus' --output text)
+            [ "$ESTADO" = "Online" ] && exit 0
+            sleep 10
+          done
+          exit 1
+
+      - name: Desplegar por SSM
+        id: command
+        env:
+          BACKEND_TAG: ${{ inputs.backend_tag || 'main' }}
+          FRONTEND_TAG: ${{ inputs.frontend_tag || 'main' }}
+          TRANSCRIPCION_TAG: ${{ inputs.transcripcion_tag || 'main' }}
+        run: |
+          PREFIX="s3://${{ steps.aws.outputs.bucket }}/deploy/${GITHUB_SHA}"
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ steps.aws.outputs.instance_id }}" \
+            --document-name AWS-RunShellScript \
+            --parameters commands="mkdir -p /home/ec2-user/argos,aws s3 cp $PREFIX/docker-compose.prod.yml /home/ec2-user/argos/docker-compose.prod.yml,aws s3 cp $PREFIX/Caddyfile /home/ec2-user/argos/Caddyfile,aws s3 cp $PREFIX/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh,aws s3 cp $PREFIX/backup-postgres.sh /home/ec2-user/argos/backup-postgres.sh,chmod 700 /home/ec2-user/argos/*.sh,AWS_REGION=${AWS_REGION} BACKEND_TAG=${BACKEND_TAG} FRONTEND_TAG=${FRONTEND_TAG} TRANSCRIPCION_TAG=${TRANSCRIPCION_TAG} /home/ec2-user/argos/deploy-mvp.sh" \
+            --query 'Command.CommandId' --output text)
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+          for intento in $(seq 1 180); do
+            ESTADO=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "${{ steps.aws.outputs.instance_id }}" \
+              --query Status --output text 2>/dev/null || true)
+            [ "$ESTADO" = "Success" ] && exit 0
+            case "$ESTADO" in Failed|Cancelled|TimedOut) exit 1 ;; esac
+            sleep 10
+          done
+          exit 1
+
+      - name: Mostrar resultado ante fallo
+        if: failure() && steps.command.outputs.command_id
+        run: |
+          aws ssm get-command-invocation \
+            --command-id "${{ steps.command.outputs.command_id }}" \
+            --instance-id "${{ steps.aws.outputs.instance_id }}"
+
+      - name: Validar URL publica
+        run: |
+          for intento in $(seq 1 30); do
+            curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/api/health" && exit 0
+            sleep 10
+          done
+          exit 1
+
+      - name: Detener EC2
+        if: always() && (github.event_name == 'push' || inputs.stop_after)
+        run: aws ec2 stop-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
+
+      - name: Resumen
+        run: |
+          {
+            echo "## ARGOS MVP"
+            echo "- URL: ${{ steps.aws.outputs.url }}"
+            echo "- Backend: ${{ inputs.backend_tag || 'main' }}"
+            echo "- Frontend: ${{ inputs.frontend_tag || 'main' }}"
+            echo "- Transcripcion: ${{ inputs.transcripcion_tag || 'main' }}"
+          } >> "$GITHUB_STEP_SUMMARY"

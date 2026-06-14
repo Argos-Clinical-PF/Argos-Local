@@ -1,0 +1,8 @@
+{$PUBLIC_HOST} {
+	tls {
+		protocols tls1.3
+	}
+
+	encode zstd gzip
+	reverse_proxy frontend:5173
+}
