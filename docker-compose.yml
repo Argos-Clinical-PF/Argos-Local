@@ -49,6 +49,7 @@ services:
       LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:

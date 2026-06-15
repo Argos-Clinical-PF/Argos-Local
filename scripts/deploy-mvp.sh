@@ -40,6 +40,11 @@ umask 077
   printf 'WHISPER_DEVICE=cpu\n'
   printf 'WHISPER_COMPUTE_TYPE=int8\n'
   printf 'WHISPER_IDIOMA=es\n'
+  # Nota clinica (Epica 5) y cifrado en reposo (ADR-007). Si el parametro no existe,
+  # se escribe vacio: el backend degrada con claridad (503 IA / sin cifrado) sin romper el deploy.
+  printf 'ANTHROPIC_API_KEY=%s\n' "$(get_parameter anthropic-api-key 2>/dev/null || true)"
+  printf 'ANTHROPIC_MODEL=claude-sonnet-4-6\n'
+  printf 'ENCRYPTION_KEY=%s\n' "$(get_parameter encryption-key 2>/dev/null || true)"
 } > .env
 
 aws ecr get-login-password --region "$REGION" \
