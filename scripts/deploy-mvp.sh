@@ -53,7 +53,7 @@ aws ecr get-login-password --region "$REGION" \
 docker compose -f docker-compose.prod.yml --env-file .env pull
 docker logout "$ECR_REGISTRY" >/dev/null
 docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
-docker image prune -f
+docker image prune -f || true
 
 for intento in $(seq 1 72); do
   if docker compose -f docker-compose.prod.yml --env-file .env \
