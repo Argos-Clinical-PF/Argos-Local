@@ -33,7 +33,7 @@ variable "profile" {
 }
 
 variable "instance_type" {
-  default = "t3.xlarge"
+  default = "c7i.2xlarge"
 }
 
 variable "public_base_url" {

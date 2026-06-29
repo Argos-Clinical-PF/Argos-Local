@@ -46,8 +46,11 @@ umask 077
   printf 'WHISPER_DEVICE=cpu\n'
   printf 'WHISPER_COMPUTE_TYPE=int8\n'
   printf 'WHISPER_IDIOMA=es\n'
-  printf 'WHISPER_BEAM_SIZE=3\n'
-  printf 'WHISPER_CPU_THREADS=2\n'
+  printf 'WHISPER_BEAM_SIZE=5\n'
+  printf 'WHISPER_CPU_THREADS=4\n'
+  printf 'WHISPER_NUM_WORKERS=2\n'
+  printf 'WHISPER_MAX_CONCURRENT_INFERENCES=2\n'
+  printf 'WHISPER_VAD_MIN_SILENCE_MS=250\n'
   # Nota clinica (Epica 5) y cifrado en reposo (ADR-007). Si el parametro no existe,
   # se escribe vacio: el backend degrada con claridad (503 IA / sin cifrado) sin romper el deploy.
   printf 'ANTHROPIC_API_KEY=%s\n' "$(get_parameter anthropic-api-key 2>/dev/null || true)"
