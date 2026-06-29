@@ -1,6 +1,7 @@
 .env
 .DS_Store
 terraform/.terraform/
+terraform/.build/
 terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/*.tfvars

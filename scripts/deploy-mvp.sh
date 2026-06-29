@@ -5,6 +5,11 @@ REGION="${AWS_REGION:-us-east-1}"
 PARAM_PREFIX="/argos/mvp"
 APP_DIR="/home/ec2-user/argos"
 
+: "${BACKEND_TAG:?BACKEND_TAG es obligatorio}"
+: "${FRONTEND_TAG:?FRONTEND_TAG es obligatorio}"
+: "${TRANSCRIPCION_TAG:?TRANSCRIPCION_TAG es obligatorio}"
+: "${EMOCIONES_TAG:?EMOCIONES_TAG es obligatorio}"
+
 get_parameter() {
   aws ssm get-parameter \
     --region "$REGION" \
@@ -23,9 +28,10 @@ cd "$APP_DIR"
 umask 077
 {
   printf 'ECR_REGISTRY=%s\n' "$ECR_REGISTRY"
-  printf 'BACKEND_TAG=%s\n' "${BACKEND_TAG:-main}"
-  printf 'FRONTEND_TAG=%s\n' "${FRONTEND_TAG:-main}"
-  printf 'TRANSCRIPCION_TAG=%s\n' "${TRANSCRIPCION_TAG:-main}"
+  printf 'BACKEND_TAG=%s\n' "$BACKEND_TAG"
+  printf 'FRONTEND_TAG=%s\n' "$FRONTEND_TAG"
+  printf 'TRANSCRIPCION_TAG=%s\n' "$TRANSCRIPCION_TAG"
+  printf 'EMOCIONES_TAG=%s\n' "$EMOCIONES_TAG"
   PUBLIC_BASE_URL="$(get_parameter public-base-url)"
   printf 'PUBLIC_BASE_URL=%s\n' "$PUBLIC_BASE_URL"
   printf 'PUBLIC_HOST=%s\n' "${PUBLIC_BASE_URL#https://}"
@@ -40,11 +46,16 @@ umask 077
   printf 'WHISPER_DEVICE=cpu\n'
   printf 'WHISPER_COMPUTE_TYPE=int8\n'
   printf 'WHISPER_IDIOMA=es\n'
+  printf 'WHISPER_BEAM_SIZE=3\n'
+  printf 'WHISPER_CPU_THREADS=2\n'
   # Nota clinica (Epica 5) y cifrado en reposo (ADR-007). Si el parametro no existe,
   # se escribe vacio: el backend degrada con claridad (503 IA / sin cifrado) sin romper el deploy.
   printf 'ANTHROPIC_API_KEY=%s\n' "$(get_parameter anthropic-api-key 2>/dev/null || true)"
   printf 'ANTHROPIC_MODEL=claude-sonnet-4-6\n'
   printf 'ENCRYPTION_KEY=%s\n' "$(get_parameter encryption-key 2>/dev/null || true)"
+  printf 'AWS_REGION=%s\n' "$REGION"
+  printf 'RECORDINGS_BUCKET=argos-mvp-grabaciones-%s\n' "$ACCOUNT_ID"
+  printf 'RECORDINGS_KMS_KEY_ID=alias/aws/s3\n'
 } > .env
 
 aws ecr get-login-password --region "$REGION" \

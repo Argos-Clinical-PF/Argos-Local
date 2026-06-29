@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.7"
+    }
   }
 }
 
@@ -29,5 +33,20 @@ variable "profile" {
 }
 
 variable "instance_type" {
-  default = "t3.medium"
+  default = "t3.xlarge"
+}
+
+variable "public_base_url" {
+  description = "Origen HTTPS permitido. Vacio usa sslip.io sobre la Elastic IP."
+  default     = ""
+}
+
+variable "monthly_budget_usd" {
+  description = "Presupuesto mensual de seguridad para el MVP."
+  default     = 25
+}
+
+variable "budget_email" {
+  description = "Correo que recibe alertas de AWS Budgets."
+  default     = "95001@sistemas.frc.utn.edu.ar"
 }
