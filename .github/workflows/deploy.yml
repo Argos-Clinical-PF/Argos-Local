@@ -90,6 +90,46 @@ jobs:
             echo "url=$PUBLIC_URL"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Adquirir lock global de release
+        id: lock
+        env:
+          BUCKET: ${{ steps.aws.outputs.bucket }}
+        run: |
+          LOCK_KEY="deploy/release.lock"
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg createdAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{repository:$repository,runId:$runId,createdAt:$createdAt}' > release-lock.json
+
+          for intento in $(seq 1 180); do
+            if aws s3api put-object \
+              --bucket "$BUCKET" \
+              --key "$LOCK_KEY" \
+              --body release-lock.json \
+              --content-type application/json \
+              --if-none-match '*' >/dev/null 2>&1; then
+              echo "acquired=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if (( intento % 30 == 0 )); then
+              MODIFICADO=$(aws s3api head-object --bucket "$BUCKET" --key "$LOCK_KEY" \
+                --query LastModified --output text 2>/dev/null || true)
+              if [ -n "$MODIFICADO" ]; then
+                EDAD=$(( $(date -u +%s) - $(date -u -d "$MODIFICADO" +%s) ))
+                if [ "$EDAD" -gt 3600 ]; then
+                  echo "Eliminando lock de release vencido (${EDAD}s)."
+                  aws s3api delete-object --bucket "$BUCKET" --key "$LOCK_KEY"
+                fi
+              fi
+            fi
+            echo "Otro release esta activo; esperando lock ($intento/180)..."
+            sleep 10
+          done
+          echo "No se pudo adquirir el lock global de release."
+          exit 1
+
       - name: Preparar manifiesto inmutable
         id: manifest
         env:
@@ -230,6 +270,13 @@ jobs:
       - name: Detener EC2
         if: always() && (github.event_name == 'push' || inputs.stop_after)
         run: aws ec2 stop-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
+
+      - name: Liberar lock global de release
+        if: always() && steps.lock.outputs.acquired == 'true'
+        run: |
+          aws s3api delete-object \
+            --bucket "${{ steps.aws.outputs.bucket }}" \
+            --key deploy/release.lock
 
       - name: Resumen
         if: success()
