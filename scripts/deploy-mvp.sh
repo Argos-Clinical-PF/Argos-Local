@@ -66,6 +66,9 @@ aws ecr get-login-password --region "$REGION" \
 
 docker compose -f docker-compose.prod.yml --env-file .env pull
 docker logout "$ECR_REGISTRY" >/dev/null
+# En una unica EC2 el reemplazo concurrente puede dejar referencias a contenedores
+# ya eliminados. Down preserva los volumenes y vuelve el release determinista.
+docker compose -f docker-compose.prod.yml --env-file .env down --remove-orphans --timeout 30
 docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
 docker image prune -f || true
 
