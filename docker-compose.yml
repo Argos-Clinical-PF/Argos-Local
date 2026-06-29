@@ -31,8 +31,13 @@ services:
       DB_USERNAME: ${POSTGRES_USER:-argos_app}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-argos_app_local}
       DB_MIGRATIONS_ENABLED: ${DB_MIGRATIONS_ENABLED:-true}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       TRANSCRIPCION_SERVICE_URL: ${TRANSCRIPCION_SERVICE_URL:-http://transcripcion:9000}
+      EMOCIONES_SERVICE_URL: ${EMOCIONES_SERVICE_URL:-http://emociones:9010}
+      ARGOS_TEMAS_PROVIDER: ${ARGOS_TEMAS_PROVIDER:-LOCAL}
+      ARGOS_TEMAS_MIN_CONFIDENCE: ${ARGOS_TEMAS_MIN_CONFIDENCE:-0.60}
+      ANTHROPIC_TOPICS_MODEL: ${ANTHROPIC_TOPICS_MODEL:-claude-haiku-4-5}
+      ANTHROPIC_TOPICS_MAX_TOKENS: ${ANTHROPIC_TOPICS_MAX_TOKENS:-900}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-http://localhost:5173}
       MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
       MAIL_PORT: ${MAIL_PORT:-587}
@@ -96,8 +101,34 @@ services:
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
     ports:
       - "${TRANSCRIPCION_PORT:-9000}:9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+  emociones:
+    build:
+      context: ../Argos-Entrenamiento
+      dockerfile: servicio-emociones/Dockerfile
+    container_name: argos-emociones
+    environment:
+      EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-vgaf}
+      EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
+      EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-false}
+    ports:
+      - "${EMOCIONES_PORT:-9010}:9010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9010/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     restart: unless-stopped
 
 volumes:
