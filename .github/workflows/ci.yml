@@ -1,0 +1,46 @@
+name: Infraestructura CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      ECR_REGISTRY: 000000000000.dkr.ecr.us-east-1.amazonaws.com
+      BACKEND_TAG: sha-validation
+      FRONTEND_TAG: sha-validation
+      TRANSCRIPCION_TAG: sha-validation
+      EMOCIONES_TAG: sha-validation
+      RECORDINGS_BUCKET: argos-validation
+      PUBLIC_BASE_URL: https://argos.example
+      PUBLIC_HOST: argos.example
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar Compose
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          docker compose -f docker-compose.prod.yml config --quiet
+
+      - name: Validar scripts
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: ./scripts
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Validar Terraform
+        working-directory: terraform
+        run: |
+          terraform init -backend=false
+          terraform fmt -check -recursive
+          terraform validate

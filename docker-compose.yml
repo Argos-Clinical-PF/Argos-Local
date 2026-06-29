@@ -33,6 +33,7 @@ services:
       DB_MIGRATIONS_ENABLED: ${DB_MIGRATIONS_ENABLED:-true}
       TRANSCRIPCION_SERVICE_URL: ${TRANSCRIPCION_SERVICE_URL:-http://transcripcion:9000}
       EMOCIONES_SERVICE_URL: ${EMOCIONES_SERVICE_URL:-http://emociones:9010}
+      EMOCIONES_TIMEOUT_MS: ${EMOCIONES_TIMEOUT_MS:-5000}
       ARGOS_TEMAS_PROVIDER: ${ARGOS_TEMAS_PROVIDER:-LOCAL}
       ARGOS_TEMAS_MIN_CONFIDENCE: ${ARGOS_TEMAS_MIN_CONFIDENCE:-0.60}
       ANTHROPIC_TOPICS_MODEL: ${ANTHROPIC_TOPICS_MODEL:-claude-haiku-4-5}
@@ -108,10 +109,15 @@ services:
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
-      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-3}
-      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-2}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-4}
+      WHISPER_NUM_WORKERS: ${WHISPER_NUM_WORKERS:-2}
+      WHISPER_MAX_CONCURRENT_INFERENCES: ${WHISPER_MAX_CONCURRENT_INFERENCES:-2}
+      WHISPER_VAD_MIN_SILENCE_MS: ${WHISPER_VAD_MIN_SILENCE_MS:-250}
     ports:
       - "${TRANSCRIPCION_PORT:-9000}:9000"
+    volumes:
+      - argos-whisper-cache:/root/.cache/huggingface
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health')"]
       interval: 15s
@@ -143,3 +149,4 @@ volumes:
   argos-postgres-data:
   argos-maven-cache:
   argos-frontend-node-modules:
+  argos-whisper-cache:
