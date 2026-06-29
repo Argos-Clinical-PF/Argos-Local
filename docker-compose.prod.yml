@@ -23,13 +23,15 @@ services:
     restart: unless-stopped
 
   transcripcion:
-    image: ${ECR_REGISTRY}/argos-transcripcion:${TRANSCRIPCION_TAG:-main}
+    image: ${ECR_REGISTRY}/argos-transcripcion:${TRANSCRIPCION_TAG}
     container_name: argos-transcripcion
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-3}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-2}
     volumes:
       - argos-whisper-cache:/root/.cache/huggingface
     healthcheck:
@@ -41,8 +43,25 @@ services:
     logging: *logging
     restart: unless-stopped
 
+  emociones:
+    image: ${ECR_REGISTRY}/argos-emociones:${EMOCIONES_TAG}
+    container_name: argos-emociones
+    environment:
+      EMOCIONES_MODEL_ID: emotiefflib-enet-b0-8-vgaf
+      EMOCIONES_AUDIO_MODEL_ID: argos-audio-cnn-ravdess
+      EMOCIONES_MOCK: "false"
+      EMOCIONES_STRICT_LOAD: "true"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://localhost:9010/health', timeout=5))['listo']"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    logging: *logging
+    restart: unless-stopped
+
   backend:
-    image: ${ECR_REGISTRY}/argos-backend:${BACKEND_TAG:-main}
+    image: ${ECR_REGISTRY}/argos-backend:${BACKEND_TAG}
     container_name: argos-backend
     environment:
       SERVER_PORT: 8080
@@ -53,6 +72,8 @@ services:
       CORS_ALLOWED_ORIGINS: ${PUBLIC_BASE_URL}
       APP_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       TRANSCRIPCION_SERVICE_URL: http://transcripcion:9000
+      EMOCIONES_SERVICE_URL: http://emociones:9010
+      EMOCIONES_ENABLED: "true"
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_HOURS: "24"
       JWT_ISSUER: argos-clinical
@@ -68,10 +89,19 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      RECORDINGS_ENABLED: "true"
+      RECORDINGS_BUCKET: ${RECORDINGS_BUCKET}
+      RECORDINGS_KMS_KEY_ID: ${RECORDINGS_KMS_KEY_ID:-alias/aws/s3}
+      RECORDINGS_RETENTION_HOURS: "12"
+      RECORDINGS_UPLOAD_URL_MINUTES: "5"
+      RECORDINGS_PLAYBACK_URL_SECONDS: "60"
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     depends_on:
       postgres:
         condition: service_healthy
       transcripcion:
+        condition: service_healthy
+      emociones:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1 || exit 1"]
@@ -83,7 +113,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ${ECR_REGISTRY}/argos-frontend:${FRONTEND_TAG:-main}
+    image: ${ECR_REGISTRY}/argos-frontend:${FRONTEND_TAG}
     container_name: argos-frontend
     depends_on:
       backend:

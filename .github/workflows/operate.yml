@@ -46,28 +46,18 @@ jobs:
         run: |
           aws ec2 start-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
           aws ec2 wait instance-status-ok --instance-ids "${{ steps.aws.outputs.instance_id }}"
-          for intento in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/api/health" && exit 0
             sleep 10
           done
           exit 1
 
-      - name: Backup y detener
+      - name: Detener
         if: inputs.action == 'stop'
         run: |
           ESTADO=$(aws ec2 describe-instances --instance-ids "${{ steps.aws.outputs.instance_id }}" \
             --query 'Reservations[0].Instances[0].State.Name' --output text)
           if [ "$ESTADO" = "running" ]; then
-            PARAMETERS=$(jq -cn --arg region "$AWS_REGION" \
-              '{commands:["AWS_REGION=\($region) /home/ec2-user/argos/backup-postgres.sh"]}')
-            COMMAND_ID=$(aws ssm send-command \
-              --instance-ids "${{ steps.aws.outputs.instance_id }}" \
-              --document-name AWS-RunShellScript \
-              --parameters "$PARAMETERS" \
-              --query 'Command.CommandId' --output text)
-            aws ssm wait command-executed \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ steps.aws.outputs.instance_id }}"
             aws ec2 stop-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
           fi
 

@@ -21,6 +21,10 @@ output "operacion_bucket" {
   value = aws_s3_bucket.operacion.id
 }
 
+output "grabaciones_bucket" {
+  value = aws_s3_bucket.grabaciones.id
+}
+
 output "github_actions_role_arn" {
   value = aws_iam_role.github_actions.arn
 }

@@ -1,46 +1,69 @@
-name: Deploy MVP
+name: Release MVP
 
 on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+      image_tag:
+        required: false
+        type: string
+        default: ""
+      stop_after:
+        required: false
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
-      backend_tag:
-        description: Tag de argos-backend
+      action:
+        description: Operación de release
         required: true
-        default: main
-      frontend_tag:
-        description: Tag de argos-frontend
+        type: choice
+        options: [deploy, rollback]
+      service:
+        description: Componente a actualizar
         required: true
-        default: main
-      transcripcion_tag:
-        description: Tag de argos-transcripcion
-        required: true
-        default: main
+        type: choice
+        options: [bundle, backend, frontend, entrenamiento]
+      image_tag:
+        description: Tag sha-* para el componente (vacío conserva current)
+        required: false
+        type: string
       stop_after:
-        description: Detener EC2 despues de validar
+        description: Detener EC2 después del smoke test
         required: true
         type: boolean
-        default: false
+        default: true
   push:
     branches: [main]
     paths:
       - Caddyfile
       - docker-compose.prod.yml
-      - scripts/**
+      - scripts/deploy-mvp.sh
       - .github/workflows/deploy.yml
 
 permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: argos-production-release
+  cancel-in-progress: false
+
 env:
   AWS_REGION: us-east-1
   AWS_ROLE_ARN: arn:aws:iam::915093573341:role/argos-github-actions
 
 jobs:
-  deploy:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Obtener bundle de Argos-Local
+        uses: actions/checkout@v4
+        with:
+          repository: Argos-Clinical-PF/Argos-Local
+          ref: main
 
       - name: Configurar credenciales AWS mediante OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -54,21 +77,84 @@ jobs:
           INSTANCE_ID=$(aws ec2 describe-instances \
             --filters Name=tag:Name,Values=argos-app Name=instance-state-name,Values=pending,running,stopping,stopped \
             --query 'Reservations[0].Instances[0].InstanceId' --output text)
-          BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'argos-mvp-operacion-')].Name | [0]" --output text)
-          PUBLIC_IP=$(aws ec2 describe-addresses \
-            --filters Name=tag:Name,Values=argos-eip \
+          BUCKET=$(aws s3api list-buckets \
+            --query "Buckets[?starts_with(Name, 'argos-mvp-operacion-')].Name | [0]" --output text)
+          PUBLIC_IP=$(aws ec2 describe-addresses --filters Name=tag:Name,Values=argos-eip \
             --query 'Addresses[0].PublicIp' --output text)
-          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
-          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
-          echo "url=https://${PUBLIC_IP//./-}.sslip.io" >> "$GITHUB_OUTPUT"
+          PUBLIC_URL=$(aws ssm get-parameter --name /argos/mvp/public-base-url \
+            --query Parameter.Value --output text 2>/dev/null || true)
+          [ -n "$PUBLIC_URL" ] || PUBLIC_URL="https://${PUBLIC_IP//./-}.sslip.io"
+          {
+            echo "instance_id=$INSTANCE_ID"
+            echo "bucket=$BUCKET"
+            echo "url=$PUBLIC_URL"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Publicar bundle de despliegue
+      - name: Preparar manifiesto inmutable
+        id: manifest
+        env:
+          BUCKET: ${{ steps.aws.outputs.bucket }}
+          ACTION: ${{ inputs.action || 'deploy' }}
+          SERVICE: ${{ inputs.service || 'bundle' }}
+          IMAGE_TAG: ${{ inputs.image_tag || '' }}
         run: |
-          PREFIX="s3://${{ steps.aws.outputs.bucket }}/deploy/${GITHUB_SHA}"
-          aws s3 cp docker-compose.prod.yml "$PREFIX/docker-compose.prod.yml"
-          aws s3 cp Caddyfile "$PREFIX/Caddyfile"
-          aws s3 cp scripts/deploy-mvp.sh "$PREFIX/deploy-mvp.sh"
-          aws s3 cp scripts/backup-postgres.sh "$PREFIX/backup-postgres.sh"
+          RELEASE_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          CURRENT="s3://${BUCKET}/deploy/manifests/current.json"
+          PREVIOUS="s3://${BUCKET}/deploy/manifests/previous.json"
+          if [ "$ACTION" = "rollback" ]; then
+            aws s3 cp "$PREVIOUS" manifest.json
+          elif ! aws s3 cp "$CURRENT" manifest.json; then
+            jq -n '{backend:"main",frontend:"main",transcripcion:"main",emociones:"main"}' > manifest.json
+          fi
+          SOURCE_RELEASE=$(jq -r '.releaseId // empty' manifest.json)
+          if [ "$ACTION" != "rollback" ] && [ -n "$IMAGE_TAG" ]; then
+            case "$SERVICE" in
+              backend|frontend) jq --arg tag "$IMAGE_TAG" --arg key "$SERVICE" '.[$key]=$tag' manifest.json > next.json ;;
+              entrenamiento) jq --arg tag "$IMAGE_TAG" '.transcripcion=$tag | .emociones=$tag' manifest.json > next.json ;;
+              bundle) cp manifest.json next.json ;;
+              *) echo "Servicio inválido: $SERVICE"; exit 1 ;;
+            esac
+            mv next.json manifest.json
+          fi
+          jq --arg release "$RELEASE_ID" --arg bundle "sha-${GITHUB_SHA}" \
+            '.releaseId=$release | .bundle=$bundle' manifest.json > candidate.json
+          {
+            echo "release_id=$RELEASE_ID"
+            echo "source_release=$SOURCE_RELEASE"
+            echo "backend=$(jq -r .backend candidate.json)"
+            echo "frontend=$(jq -r .frontend candidate.json)"
+            echo "transcripcion=$(jq -r .transcripcion candidate.json)"
+            echo "emociones=$(jq -r .emociones candidate.json)"
+          } >> "$GITHUB_OUTPUT"
+          cat candidate.json
+
+      - name: Verificar imágenes del manifiesto en ECR
+        run: |
+          aws ecr batch-get-image --repository-name argos-backend \
+            --image-ids imageTag=${{ steps.manifest.outputs.backend }} --query 'images[0].imageId' --output text | grep -v '^None$'
+          aws ecr batch-get-image --repository-name argos-frontend \
+            --image-ids imageTag=${{ steps.manifest.outputs.frontend }} --query 'images[0].imageId' --output text | grep -v '^None$'
+          aws ecr batch-get-image --repository-name argos-transcripcion \
+            --image-ids imageTag=${{ steps.manifest.outputs.transcripcion }} --query 'images[0].imageId' --output text | grep -v '^None$'
+          aws ecr batch-get-image --repository-name argos-emociones \
+            --image-ids imageTag=${{ steps.manifest.outputs.emociones }} --query 'images[0].imageId' --output text | grep -v '^None$'
+
+      - name: Publicar bundle de release
+        env:
+          ACTION: ${{ inputs.action || 'deploy' }}
+        run: |
+          PREFIX="s3://${{ steps.aws.outputs.bucket }}/deploy/releases/${{ steps.manifest.outputs.release_id }}"
+          if [ "$ACTION" = "rollback" ]; then
+            SOURCE="s3://${{ steps.aws.outputs.bucket }}/deploy/releases/${{ steps.manifest.outputs.source_release }}"
+            aws s3 cp "$SOURCE/docker-compose.prod.yml" "$PREFIX/docker-compose.prod.yml"
+            aws s3 cp "$SOURCE/Caddyfile" "$PREFIX/Caddyfile"
+            aws s3 cp "$SOURCE/deploy-mvp.sh" "$PREFIX/deploy-mvp.sh"
+          else
+            aws s3 cp docker-compose.prod.yml "$PREFIX/docker-compose.prod.yml"
+            aws s3 cp Caddyfile "$PREFIX/Caddyfile"
+            aws s3 cp scripts/deploy-mvp.sh "$PREFIX/deploy-mvp.sh"
+          fi
+          aws s3 cp candidate.json "$PREFIX/manifest.json"
 
       - name: Iniciar EC2
         run: |
@@ -77,7 +163,7 @@ jobs:
 
       - name: Esperar Systems Manager
         run: |
-          for intento in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             ESTADO=$(aws ssm describe-instance-information \
               --filters Key=InstanceIds,Values=${{ steps.aws.outputs.instance_id }} \
               --query 'InstanceInformationList[0].PingStatus' --output text)
@@ -86,71 +172,73 @@ jobs:
           done
           exit 1
 
-      - name: Desplegar por SSM
+      - name: Desplegar manifiesto
         id: command
-        env:
-          BACKEND_TAG: ${{ inputs.backend_tag || 'main' }}
-          FRONTEND_TAG: ${{ inputs.frontend_tag || 'main' }}
-          TRANSCRIPCION_TAG: ${{ inputs.transcripcion_tag || 'main' }}
         run: |
-          PREFIX="s3://${{ steps.aws.outputs.bucket }}/deploy/${GITHUB_SHA}"
+          PREFIX="s3://${{ steps.aws.outputs.bucket }}/deploy/releases/${{ steps.manifest.outputs.release_id }}"
           PARAMETERS=$(jq -cn \
-            --arg prefix "$PREFIX" \
-            --arg region "$AWS_REGION" \
-            --arg backend "$BACKEND_TAG" \
-            --arg frontend "$FRONTEND_TAG" \
-            --arg transcripcion "$TRANSCRIPCION_TAG" \
+            --arg prefix "$PREFIX" --arg region "$AWS_REGION" \
+            --arg backend "${{ steps.manifest.outputs.backend }}" \
+            --arg frontend "${{ steps.manifest.outputs.frontend }}" \
+            --arg transcripcion "${{ steps.manifest.outputs.transcripcion }}" \
+            --arg emociones "${{ steps.manifest.outputs.emociones }}" \
             '{commands:[
               "mkdir -p /home/ec2-user/argos",
               "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/docker-compose.prod.yml",
               "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/Caddyfile",
               "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh",
-              "aws s3 cp \($prefix)/backup-postgres.sh /home/ec2-user/argos/backup-postgres.sh",
-              "chmod 700 /home/ec2-user/argos/*.sh",
-              "AWS_REGION=\($region) BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) /home/ec2-user/argos/deploy-mvp.sh"
+              "chmod 700 /home/ec2-user/argos/deploy-mvp.sh",
+              "AWS_REGION=\($region) BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) EMOCIONES_TAG=\($emociones) /home/ec2-user/argos/deploy-mvp.sh"
             ]}')
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "${{ steps.aws.outputs.instance_id }}" \
-            --document-name AWS-RunShellScript \
-            --parameters "$PARAMETERS" \
+          COMMAND_ID=$(aws ssm send-command --instance-ids "${{ steps.aws.outputs.instance_id }}" \
+            --document-name AWS-RunShellScript --parameters "$PARAMETERS" \
             --query 'Command.CommandId' --output text)
           echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
-          for intento in $(seq 1 180); do
-            ESTADO=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ steps.aws.outputs.instance_id }}" \
-              --query Status --output text 2>/dev/null || true)
+          for _ in $(seq 1 180); do
+            ESTADO=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
+              --instance-id "${{ steps.aws.outputs.instance_id }}" --query Status --output text 2>/dev/null || true)
             [ "$ESTADO" = "Success" ] && exit 0
             case "$ESTADO" in Failed|Cancelled|TimedOut) exit 1 ;; esac
             sleep 10
           done
           exit 1
 
-      - name: Mostrar resultado ante fallo
+      - name: Mostrar diagnóstico ante fallo
         if: failure() && steps.command.outputs.command_id
-        run: |
-          aws ssm get-command-invocation \
-            --command-id "${{ steps.command.outputs.command_id }}" \
-            --instance-id "${{ steps.aws.outputs.instance_id }}"
+        run: aws ssm get-command-invocation --command-id "${{ steps.command.outputs.command_id }}" --instance-id "${{ steps.aws.outputs.instance_id }}"
 
-      - name: Validar URL publica
+      - name: Smoke test público
         run: |
-          for intento in $(seq 1 30); do
-            curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/api/health" && exit 0
+          for _ in $(seq 1 45); do
+            if curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/api/health" >/dev/null \
+              && curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/" >/dev/null; then
+              exit 0
+            fi
             sleep 10
           done
           exit 1
+
+      - name: Promover manifiesto
+        run: |
+          CURRENT="s3://${{ steps.aws.outputs.bucket }}/deploy/manifests/current.json"
+          PREVIOUS="s3://${{ steps.aws.outputs.bucket }}/deploy/manifests/previous.json"
+          if aws s3 cp "$CURRENT" previous.json 2>/dev/null; then
+            aws s3 cp previous.json "$PREVIOUS"
+          fi
+          aws s3 cp candidate.json "$CURRENT"
 
       - name: Detener EC2
         if: always() && (github.event_name == 'push' || inputs.stop_after)
         run: aws ec2 stop-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
 
       - name: Resumen
+        if: success()
         run: |
           {
-            echo "## ARGOS MVP"
+            echo "## ARGOS MVP ${{ steps.manifest.outputs.release_id }}"
             echo "- URL: ${{ steps.aws.outputs.url }}"
-            echo "- Backend: ${{ inputs.backend_tag || 'main' }}"
-            echo "- Frontend: ${{ inputs.frontend_tag || 'main' }}"
-            echo "- Transcripcion: ${{ inputs.transcripcion_tag || 'main' }}"
+            echo "- Backend: ${{ steps.manifest.outputs.backend }}"
+            echo "- Frontend: ${{ steps.manifest.outputs.frontend }}"
+            echo "- Transcripción: ${{ steps.manifest.outputs.transcripcion }}"
+            echo "- Emociones: ${{ steps.manifest.outputs.emociones }}"
           } >> "$GITHUB_STEP_SUMMARY"
