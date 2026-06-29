@@ -511,6 +511,11 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:PutObject"
         ]
         Resource = "${aws_s3_bucket.operacion.arn}/deploy/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "s3:DeleteObject"
+        Resource = "${aws_s3_bucket.operacion.arn}/deploy/release.lock"
       }
     ]
   })
