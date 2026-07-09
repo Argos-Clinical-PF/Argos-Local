@@ -2,5 +2,10 @@
 profile       = "argos-facu"
 region        = "us-east-1"
 instance_type = "c7i.2xlarge"
+
+# Modo demo IA con GPU. Requiere cuota EC2 G/VT aprobada antes de aplicar.
+demo_gpu         = false
+gpu_instance_type = "g5.xlarge"
+
 monthly_budget_usd = 25
 budget_email       = "95001@sistemas.frc.utn.edu.ar"

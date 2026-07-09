@@ -24,6 +24,15 @@ data "aws_ami" "al2023" {
   }
 }
 
+data "aws_ssm_parameter" "dlami_gpu_al2023" {
+  name = "/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-amazon-linux-2023/latest/ami-id"
+}
+
+locals {
+  ami_id        = var.demo_gpu ? data.aws_ssm_parameter.dlami_gpu_al2023.value : data.aws_ami.al2023.id
+  instance_type = var.demo_gpu ? var.gpu_instance_type : var.instance_type
+}
+
 resource "aws_ecr_repository" "repos" {
   for_each             = toset(["argos-backend", "argos-frontend", "argos-transcripcion", "argos-emociones"])
   name                 = each.value
@@ -81,8 +90,8 @@ resource "aws_security_group" "ec2" {
 }
 
 resource "aws_instance" "app" {
-  ami                         = data.aws_ami.al2023.id
-  instance_type               = var.instance_type
+  ami                         = local.ami_id
+  instance_type               = local.instance_type
   subnet_id                   = data.aws_subnets.default.ids[0]
   vpc_security_group_ids      = [aws_security_group.ec2.id]
   iam_instance_profile        = aws_iam_instance_profile.ec2.name
@@ -101,12 +110,10 @@ resource "aws_instance" "app" {
   }
 
   tags = {
-    Name = "argos-app"
+    Name        = "argos-app"
+    ComputeMode = var.demo_gpu ? "gpu-demo" : "cpu"
   }
 
-  lifecycle {
-    ignore_changes = [ami]
-  }
 }
 
 resource "aws_eip" "app" {

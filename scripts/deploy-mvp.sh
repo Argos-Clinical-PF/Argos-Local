@@ -19,11 +19,37 @@ get_parameter() {
     --output text
 }
 
+get_parameter_optional() {
+  aws ssm get-parameter \
+    --region "$REGION" \
+    --name "$PARAM_PREFIX/$1" \
+    --with-decryption \
+    --query "Parameter.Value" \
+    --output text 2>/dev/null || true
+}
+
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
+
+DEMO_GPU="$(get_parameter_optional demo-gpu)"
+DEMO_GPU="${DEMO_GPU:-false}"
+if [ "$DEMO_GPU" = "true" ]; then
+  if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi >/dev/null 2>&1; then
+    echo "DEMO_GPU=true pero nvidia-smi no esta disponible. Revisar cuota/AMI/runtime NVIDIA."
+    exit 1
+  fi
+  WHISPER_MODEL_VALUE="$(get_parameter_optional whisper-model-gpu)"
+  WHISPER_MODEL_VALUE="${WHISPER_MODEL_VALUE:-medium}"
+  WHISPER_DEVICE_VALUE="cuda"
+  WHISPER_COMPUTE_VALUE="float16"
+else
+  WHISPER_MODEL_VALUE="$(get_parameter whisper-model)"
+  WHISPER_DEVICE_VALUE="cpu"
+  WHISPER_COMPUTE_VALUE="int8"
+fi
 
 umask 077
 {
@@ -42,9 +68,9 @@ umask 077
   printf 'MAIL_USERNAME=%s\n' "$(get_parameter mail-username)"
   printf 'MAIL_PASSWORD=%s\n' "$(get_parameter mail-password)"
   printf 'MAIL_FROM=%s\n' "$(get_parameter mail-username)"
-  printf 'WHISPER_MODEL=%s\n' "$(get_parameter whisper-model)"
-  printf 'WHISPER_DEVICE=cpu\n'
-  printf 'WHISPER_COMPUTE_TYPE=int8\n'
+  printf 'WHISPER_MODEL=%s\n' "$WHISPER_MODEL_VALUE"
+  printf 'WHISPER_DEVICE=%s\n' "$WHISPER_DEVICE_VALUE"
+  printf 'WHISPER_COMPUTE_TYPE=%s\n' "$WHISPER_COMPUTE_VALUE"
   printf 'WHISPER_IDIOMA=es\n'
   printf 'WHISPER_BEAM_SIZE=5\n'
   printf 'WHISPER_CPU_THREADS=4\n'
@@ -54,34 +80,40 @@ umask 077
   # Nota clinica (Epica 5) y cifrado en reposo (ADR-007). Si el parametro no existe,
   # se escribe vacio: el backend degrada con claridad (503 IA / sin cifrado) sin romper el deploy.
   printf 'ANTHROPIC_API_KEY=%s\n' "$(get_parameter anthropic-api-key 2>/dev/null || true)"
-  printf 'ANTHROPIC_MODEL=claude-sonnet-4-6\n'
+  printf 'ANTHROPIC_MODEL=claude-sonnet-5\n'
   printf 'ENCRYPTION_KEY=%s\n' "$(get_parameter encryption-key 2>/dev/null || true)"
   printf 'AWS_REGION=%s\n' "$REGION"
   printf 'RECORDINGS_BUCKET=argos-mvp-grabaciones-%s\n' "$ACCOUNT_ID"
   printf 'RECORDINGS_KMS_KEY_ID=alias/aws/s3\n'
+  printf 'EMOCIONES_REQUIRE_FACE_TRACKING=%s\n' "$( [ "$DEMO_GPU" = "true" ] && echo true || echo false )"
 } > .env
+
+COMPOSE_FILES=(-f docker-compose.prod.yml)
+if [ "$DEMO_GPU" = "true" ]; then
+  COMPOSE_FILES+=(-f docker-compose.gpu.yml)
+fi
 
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-docker compose -f docker-compose.prod.yml --env-file .env pull
+docker compose "${COMPOSE_FILES[@]}" --env-file .env pull
 docker logout "$ECR_REGISTRY" >/dev/null
 # En una unica EC2 el reemplazo concurrente puede dejar referencias a contenedores
 # ya eliminados. Down preserva los volumenes y vuelve el release determinista.
-docker compose -f docker-compose.prod.yml --env-file .env down --remove-orphans --timeout 30
-docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
+docker compose "${COMPOSE_FILES[@]}" --env-file .env down --remove-orphans --timeout 30
+docker compose "${COMPOSE_FILES[@]}" --env-file .env up -d --remove-orphans
 docker image prune -f || true
 
 for intento in $(seq 1 72); do
-  if docker compose -f docker-compose.prod.yml --env-file .env \
+  if docker compose "${COMPOSE_FILES[@]}" --env-file .env \
     exec -T backend wget -qO- http://localhost:8080/api/health >/dev/null 2>&1; then
-    docker compose -f docker-compose.prod.yml --env-file .env ps
+    docker compose "${COMPOSE_FILES[@]}" --env-file .env ps
     exit 0
   fi
   echo "Esperando healthcheck del MVP ($intento/72)..."
   sleep 10
 done
 
-docker compose -f docker-compose.prod.yml --env-file .env ps
-docker compose -f docker-compose.prod.yml --env-file .env logs --tail=100
+docker compose "${COMPOSE_FILES[@]}" --env-file .env ps
+docker compose "${COMPOSE_FILES[@]}" --env-file .env logs --tail=100
 exit 1
