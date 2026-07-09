@@ -33,6 +33,7 @@ services:
       DB_MIGRATIONS_ENABLED: ${DB_MIGRATIONS_ENABLED:-true}
       TRANSCRIPCION_SERVICE_URL: ${TRANSCRIPCION_SERVICE_URL:-http://transcripcion:9000}
       EMOCIONES_SERVICE_URL: ${EMOCIONES_SERVICE_URL:-http://emociones:9010}
+      EMOCIONES_TIMEOUT_MS: 15000
       ARGOS_TEMAS_PROVIDER: ${ARGOS_TEMAS_PROVIDER:-LOCAL}
       ARGOS_TEMAS_MIN_CONFIDENCE: ${ARGOS_TEMAS_MIN_CONFIDENCE:-0.60}
       ANTHROPIC_TOPICS_MODEL: ${ANTHROPIC_TOPICS_MODEL:-claude-haiku-4-5}
@@ -119,6 +120,7 @@ services:
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-vgaf}
+      EMOCIONES_AUDIO_MODEL_ID: jihedjabnoun/wavlm-base-emotion
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
       EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-false}
     ports:
