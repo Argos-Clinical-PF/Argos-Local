@@ -36,6 +36,16 @@ variable "instance_type" {
   default = "c7i.2xlarge"
 }
 
+variable "demo_gpu" {
+  description = "Activa perfil demo con AMI GPU y compose overlay CUDA."
+  default     = false
+}
+
+variable "gpu_instance_type" {
+  description = "Instancia GPU para demos. Requiere cuota EC2 G/VT aprobada."
+  default     = "g5.xlarge"
+}
+
 variable "public_base_url" {
   description = "Origen HTTPS permitido. Vacio usa sslip.io sobre la Elastic IP."
   default     = ""
