@@ -1,0 +1,8 @@
+# Overlay para demo GPU. Se usa junto con docker-compose.prod.yml cuando
+# /argos/mvp/demo-gpu=true. CPU sigue siendo el modo barato por defecto.
+services:
+  transcripcion:
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility

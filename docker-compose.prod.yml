@@ -54,6 +54,7 @@ services:
       EMOCIONES_AUDIO_MODEL_ID: argos-audio-cnn-ravdess
       EMOCIONES_MOCK: "false"
       EMOCIONES_STRICT_LOAD: "true"
+      EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-false}
     healthcheck:
       test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://localhost:9010/health', timeout=5))['listo']"]
       interval: 15s
@@ -91,7 +92,7 @@ services:
       LOGIN_MAX_FAILED_ATTEMPTS: "5"
       LOGIN_LOCK_MINUTES: "15"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       RECORDINGS_ENABLED: "true"
       RECORDINGS_BUCKET: ${RECORDINGS_BUCKET}
