@@ -3,16 +3,17 @@
 ## Arquitectura
 
 ```text
-GitHub Actions (OIDC) -> ECR -> SSM -> EC2 t3.medium
+GitHub Actions (OIDC) -> ECR -> SSM -> EC2 c7i.2xlarge
 Usuario -> HTTPS sslip.io -> EIP -> Caddy -> Nginx frontend -> backend -> PostgreSQL
-                                                       \-> servicio Whisper
+                                                       \-> Whisper + emociones
 ```
 
 - No requiere dominio comprado, ALB, SSH ni credenciales AWS guardadas en GitHub.
 - `sslip.io` resuelve gratuitamente un hostname basado en la EIP.
 - Caddy obtiene y renueva automáticamente un certificado público y exige TLS 1.3.
 - PostgreSQL, backend y transcripción no publican puertos al exterior.
-- La EC2 configura 2 GB de swap para absorber picos puntuales de Whisper.
+- La instancia compute-optimized aporta 8 vCPU sostenidas para la inferencia CPU
+  y permanece detenida fuera de demos.
 - El despliegue automático ocurre al integrar cambios en `main`.
 
 Esta arquitectura es para demostración del MVP y no debe procesar datos clínicos
@@ -58,16 +59,34 @@ Cada repositorio de servicio contiene `.github/workflows/ci-cd.yml`:
 `Argos-Local` contiene:
 
 - `Deploy MVP`: despliegue completo manual o ante cambios del Compose.
-- `Operate MVP`: iniciar, detener, consultar estado o respaldar PostgreSQL.
-- `Deploy service image`: workflow reutilizable por los servicios.
+- `Operate MVP`: iniciar, detener o consultar el estado de la instancia.
+- `Release MVP`: workflow reutilizable por los servicios, con manifiesto y rollback.
 
 ## Operación diaria
 
 Para una demo:
 
-1. Ejecutar `Operate MVP` con acción `start`.
-2. Esperar el estado saludable y abrir la URL del output de Terraform.
-3. Al terminar, ejecutar `Operate MVP` con acción `stop`.
+1. Verificar que no haya un workflow `Release MVP` en ejecución.
+2. Ejecutar `Operate MVP` con acción `start` desde GitHub Actions o por CLI:
+
+   ```bash
+   gh workflow run operate.yml -f action=start
+   gh run list --workflow operate.yml --limit 1
+   ```
+
+3. Esperar que el workflow finalice. El arranque de EC2, Docker y los modelos
+   puede tardar entre cuatro y ocho minutos; `running` no significa todavía que
+   la aplicación esté saludable.
+4. Abrir `https://32-193-249-170.sslip.io` solamente después del smoke test.
+5. Al terminar, ejecutar `Operate MVP` con acción `stop`.
+
+   ```bash
+   gh workflow run operate.yml -f action=stop
+   ```
+
+La consola de EC2 también puede iniciar la instancia, pero no espera el health
+de la aplicación. Los workflows de release la detienen siempre al finalizar,
+incluso si el despliegue falla.
 
 También se puede desplegar manualmente desde `Deploy MVP`, seleccionando los
 tags deseados y si la EC2 debe detenerse después de validar.
@@ -81,6 +100,5 @@ confirmar que la instancia `argos-app` esté en estado `stopped`.
 ## Recuperación
 
 - Los datos de PostgreSQL persisten en el volumen Docker de la EC2.
-- `Operate MVP` permite generar un dump cifrado en el bucket S3 operativo.
 - Las imágenes conservan tags inmutables `sha-*` para volver a una versión.
 - Para rollback, ejecutar `Deploy MVP` indicando los tags `sha-*` previos.

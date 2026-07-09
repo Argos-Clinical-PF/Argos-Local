@@ -6,6 +6,16 @@ systemctl enable --now docker
 systemctl enable --now amazon-ssm-agent
 usermod -aG docker ec2-user
 
+# En AMI Deep Learning GPU el driver ya viene instalado. Si el runtime NVIDIA
+# está disponible, lo registramos en Docker para que Compose pueda usar gpus: all.
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi || true
+  if command -v nvidia-ctk >/dev/null 2>&1; then
+    nvidia-ctk runtime configure --runtime=docker || true
+    systemctl restart docker
+  fi
+fi
+
 # Proteccion ante picos puntuales de memoria del modelo de transcripcion.
 if [ ! -f /swapfile ]; then
   fallocate -l 2G /swapfile

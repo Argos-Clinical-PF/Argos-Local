@@ -33,10 +33,10 @@ services:
       DB_MIGRATIONS_ENABLED: ${DB_MIGRATIONS_ENABLED:-true}
       TRANSCRIPCION_SERVICE_URL: ${TRANSCRIPCION_SERVICE_URL:-http://transcripcion:9000}
       EMOCIONES_SERVICE_URL: ${EMOCIONES_SERVICE_URL:-http://emociones:9010}
-      EMOCIONES_TIMEOUT_MS: 15000
+      EMOCIONES_TIMEOUT_MS: ${EMOCIONES_TIMEOUT_MS:-5000}
       ARGOS_TEMAS_PROVIDER: ${ARGOS_TEMAS_PROVIDER:-LOCAL}
       ARGOS_TEMAS_MIN_CONFIDENCE: ${ARGOS_TEMAS_MIN_CONFIDENCE:-0.60}
-      ANTHROPIC_TOPICS_MODEL: ${ANTHROPIC_TOPICS_MODEL:-claude-haiku-4-5}
+      ANTHROPIC_TOPICS_MODEL: ${ANTHROPIC_TOPICS_MODEL:-claude-haiku-4-5-20251001}
       ANTHROPIC_TOPICS_MAX_TOKENS: ${ANTHROPIC_TOPICS_MAX_TOKENS:-900}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-http://localhost:5173}
@@ -54,8 +54,13 @@ services:
       LOGIN_MAX_FAILED_ATTEMPTS: ${LOGIN_MAX_FAILED_ATTEMPTS:-5}
       LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      RECORDINGS_ENABLED: ${RECORDINGS_ENABLED:-false}
+      RECORDINGS_BUCKET: ${RECORDINGS_BUCKET:-}
+      RECORDINGS_KMS_KEY_ID: ${RECORDINGS_KMS_KEY_ID:-alias/aws/s3}
+      RECORDINGS_RETENTION_HOURS: ${RECORDINGS_RETENTION_HOURS:-12}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -65,7 +70,9 @@ services:
       postgres:
         condition: service_healthy
       transcripcion:
-        condition: service_started
+        condition: service_healthy
+      emociones:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -98,13 +105,19 @@ services:
       context: ../Argos-Entrenamiento/servicio-transcripcion
     container_name: argos-transcripcion
     environment:
-      WHISPER_MODEL: ${WHISPER_MODEL:-medium}
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
       WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-4}
+      WHISPER_NUM_WORKERS: ${WHISPER_NUM_WORKERS:-2}
+      WHISPER_MAX_CONCURRENT_INFERENCES: ${WHISPER_MAX_CONCURRENT_INFERENCES:-2}
+      WHISPER_VAD_MIN_SILENCE_MS: ${WHISPER_VAD_MIN_SILENCE_MS:-250}
     ports:
       - "${TRANSCRIPCION_PORT:-9000}:9000"
+    volumes:
+      - argos-whisper-cache:/root/.cache/huggingface
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health')"]
       interval: 15s
@@ -120,13 +133,13 @@ services:
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-vgaf}
-      EMOCIONES_AUDIO_MODEL_ID: jihedjabnoun/wavlm-base-emotion
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
-      EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-false}
+      EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-true}
+      EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-false}
     ports:
       - "${EMOCIONES_PORT:-9010}:9010"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9010/health')"]
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:9010/health'))['listo']"]
       interval: 15s
       timeout: 5s
       retries: 20
@@ -137,3 +150,4 @@ volumes:
   argos-postgres-data:
   argos-maven-cache:
   argos-frontend-node-modules:
+  argos-whisper-cache:
