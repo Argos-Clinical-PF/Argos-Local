@@ -133,6 +133,7 @@ services:
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-vgaf}
+      EMOCIONES_AUDIO_MODEL_ID: ${EMOCIONES_AUDIO_MODEL_ID:-wavlm-base-emotion-hf}
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
       EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-true}
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-false}
