@@ -101,6 +101,8 @@ services:
       RECORDINGS_UPLOAD_URL_MINUTES: "5"
       RECORDINGS_PLAYBACK_URL_SECONDS: "60"
       AWS_REGION: ${AWS_REGION:-us-east-1}
+    volumes:
+      - argos-profile-uploads:/app/uploads/perfiles
     depends_on:
       postgres:
         condition: service_healthy
@@ -155,3 +157,4 @@ volumes:
   argos-whisper-cache:
   argos-caddy-data:
   argos-caddy-config:
+  argos-profile-uploads:
