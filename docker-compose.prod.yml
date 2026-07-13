@@ -1,5 +1,14 @@
 # Compose del ambiente MVP compartido. Corre en una unica EC2 y usa imagenes de ECR.
 services:
+  profile-storage-init:
+    image: alpine:3.22
+    container_name: argos-profile-storage-init
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 10001:10001 /uploads"]
+    volumes:
+      - argos-profile-uploads:/uploads
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     container_name: argos-postgres
@@ -104,6 +113,8 @@ services:
     volumes:
       - argos-profile-uploads:/app/uploads/perfiles
     depends_on:
+      profile-storage-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       transcripcion:
