@@ -114,6 +114,12 @@ resource "aws_instance" "app" {
     ComputeMode = var.demo_gpu ? "gpu-demo" : "cpu"
   }
 
+  lifecycle {
+    # La AMI latest solo se adopta en una recreacion explicitamente revisada.
+    # Para cambiar CPU/GPU usar -replace; nunca destruir el host por drift diario.
+    ignore_changes = [ami]
+  }
+
 }
 
 resource "aws_eip" "app" {
@@ -244,11 +250,11 @@ resource "aws_s3_bucket_cors_configuration" "grabaciones" {
 resource "aws_s3_bucket_lifecycle_configuration" "grabaciones" {
   bucket = aws_s3_bucket.grabaciones.id
   rule {
-    id     = "defensa-eliminacion-24h"
+    id     = "defensa-eliminacion-31d"
     status = "Enabled"
     filter {}
     expiration {
-      days = 1
+      days = 31
     }
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
@@ -302,7 +308,7 @@ resource "aws_iam_role_policy" "lambda_grabaciones" {
       },
       {
         Effect   = "Allow"
-        Action   = ["s3:DeleteObject", "s3:AbortMultipartUpload"]
+        Action   = ["s3:DeleteObject", "s3:AbortMultipartUpload", "s3:GetObjectTagging"]
         Resource = "${aws_s3_bucket.grabaciones.arn}/*"
       },
       {
@@ -325,8 +331,9 @@ resource "aws_lambda_function" "eliminar_grabaciones" {
   memory_size      = 128
   environment {
     variables = {
-      BUCKET          = aws_s3_bucket.grabaciones.id
-      RETENTION_HOURS = "12"
+      BUCKET                    = aws_s3_bucket.grabaciones.id
+      MAX_RETENTION_HOURS       = "720"
+      MULTIPART_RETENTION_HOURS = "24"
     }
   }
   depends_on = [aws_cloudwatch_log_group.eliminar_grabaciones]
@@ -409,6 +416,7 @@ resource "aws_iam_role_policy" "ec2_operacion" {
           "s3:AbortMultipartUpload",
           "s3:DeleteObject",
           "s3:GetObject",
+          "s3:PutObjectTagging",
           "s3:ListMultipartUploadParts",
           "s3:PutObject"
         ]

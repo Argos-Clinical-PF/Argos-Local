@@ -1,5 +1,14 @@
 # Compose del ambiente MVP compartido. Corre en una unica EC2 y usa imagenes de ECR.
 services:
+  profile-storage-init:
+    image: alpine:3.22
+    container_name: argos-profile-storage-init
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 10001:10001 /uploads"]
+    volumes:
+      - argos-profile-uploads:/uploads
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     container_name: argos-postgres
@@ -30,7 +39,7 @@ services:
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
-      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-3}
       WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-4}
       WHISPER_NUM_WORKERS: ${WHISPER_NUM_WORKERS:-2}
       WHISPER_MAX_CONCURRENT_INFERENCES: ${WHISPER_MAX_CONCURRENT_INFERENCES:-2}
@@ -97,11 +106,15 @@ services:
       RECORDINGS_ENABLED: "true"
       RECORDINGS_BUCKET: ${RECORDINGS_BUCKET}
       RECORDINGS_KMS_KEY_ID: ${RECORDINGS_KMS_KEY_ID:-alias/aws/s3}
-      RECORDINGS_RETENTION_HOURS: "12"
+      RECORDINGS_MAX_RETENTION_HOURS: "720"
       RECORDINGS_UPLOAD_URL_MINUTES: "5"
       RECORDINGS_PLAYBACK_URL_SECONDS: "60"
       AWS_REGION: ${AWS_REGION:-us-east-1}
+    volumes:
+      - argos-profile-uploads:/app/uploads/perfiles
     depends_on:
+      profile-storage-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       transcripcion:
@@ -155,3 +168,4 @@ volumes:
   argos-whisper-cache:
   argos-caddy-data:
   argos-caddy-config:
+  argos-profile-uploads:

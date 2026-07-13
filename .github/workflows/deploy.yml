@@ -201,8 +201,21 @@ jobs:
 
       - name: Iniciar EC2
         run: |
-          aws ec2 start-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
-          aws ec2 wait instance-status-ok --instance-ids "${{ steps.aws.outputs.instance_id }}"
+          INSTANCE_ID="${{ steps.aws.outputs.instance_id }}"
+          ESTADO=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text)
+          if [ "$ESTADO" = "stopping" ]; then
+            echo "La instancia todavía se está deteniendo; esperando estado stopped."
+            aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
+            ESTADO="stopped"
+          fi
+          if [ "$ESTADO" = "stopped" ]; then
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+          elif [ "$ESTADO" != "running" ] && [ "$ESTADO" != "pending" ]; then
+            echo "Estado EC2 no recuperable para deploy: $ESTADO"
+            exit 1
+          fi
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
 
       - name: Esperar Systems Manager
         run: |
@@ -273,7 +286,16 @@ jobs:
 
       - name: Detener EC2
         if: always() && (github.event_name == 'push' || inputs.stop_after)
-        run: aws ec2 stop-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
+        run: |
+          INSTANCE_ID="${{ steps.aws.outputs.instance_id }}"
+          ESTADO=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text)
+          if [ "$ESTADO" = "running" ] || [ "$ESTADO" = "pending" ]; then
+            aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+          fi
+          if [ "$ESTADO" != "stopped" ]; then
+            aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
+          fi
 
       - name: Liberar lock global de release
         if: always() && steps.lock.outputs.acquired == 'true'
