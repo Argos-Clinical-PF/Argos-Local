@@ -82,6 +82,11 @@ umask 077
   printf 'ANTHROPIC_API_KEY=%s\n' "$(get_parameter anthropic-api-key 2>/dev/null || true)"
   printf 'ANTHROPIC_MODEL=claude-sonnet-5\n'
   printf 'ENCRYPTION_KEY=%s\n' "$(get_parameter encryption-key 2>/dev/null || true)"
+  # Back Office: credenciales del primer ADMIN_PLATAFORMA. Se aplican una sola vez, cuando la
+  # tabla administradores esta vacia (AdminSeedRunner). Si el parametro no existe en SSM, se
+  # escribe vacio y el seed se omite con un WARN: nunca hay credenciales por defecto conocidas.
+  printf 'ADMIN_SEED_EMAIL=%s\n' "$(get_parameter_optional admin-seed-email)"
+  printf 'ADMIN_SEED_PASSWORD=%s\n' "$(get_parameter_optional admin-seed-password)"
   printf 'AWS_REGION=%s\n' "$REGION"
   printf 'RECORDINGS_BUCKET=argos-mvp-grabaciones-%s\n' "$ACCOUNT_ID"
   printf 'RECORDINGS_KMS_KEY_ID=alias/aws/s3\n'
