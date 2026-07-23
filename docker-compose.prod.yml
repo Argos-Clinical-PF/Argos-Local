@@ -89,7 +89,7 @@ services:
       EMOCIONES_ENABLED: "true"
       EMOCIONES_TIMEOUT_MS: "5000"
       JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRATION_HOURS: "24"
+      JWT_ACCESS_MINUTES: "15"
       JWT_ISSUER: argos-clinical
       MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
       MAIL_PORT: ${MAIL_PORT:-587}
