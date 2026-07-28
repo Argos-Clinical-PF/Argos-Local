@@ -47,6 +47,11 @@ jobs:
         with:
           scandir: ./scripts
 
+      - name: Validar trazabilidad del bundle de release
+        run: |
+          grep -Fq 'id: bundle' .github/workflows/deploy.yml
+          grep -Fq 'steps.bundle.outputs.sha' .github/workflows/deploy.yml
+
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.8
