@@ -130,6 +130,70 @@ resource "aws_eip" "app" {
   }
 }
 
+locals {
+  direct_ip_url = "https://${aws_eip.app.public_ip}"
+  sslip_host    = "${replace(aws_eip.app.public_ip, ".", "-")}.sslip.io"
+  sslip_url     = "https://${local.sslip_host}"
+}
+
+data "aws_cloudfront_cache_policy" "sin_cache" {
+  count = var.cloudfront_fallback_enabled ? 1 : 0
+  name  = "Managed-CachingDisabled"
+}
+
+data "aws_cloudfront_origin_request_policy" "todos_sin_host" {
+  count = var.cloudfront_fallback_enabled ? 1 : 0
+  name  = "Managed-AllViewerExceptHostHeader"
+}
+
+resource "aws_cloudfront_distribution" "app" {
+  count               = var.cloudfront_fallback_enabled ? 1 : 0
+  enabled             = true
+  is_ipv6_enabled     = true
+  comment             = "ARGOS Clinical - endpoint DNS estable de contingencia"
+  price_class         = "PriceClass_100"
+  wait_for_deployment = false
+  http_version        = "http2and3"
+
+  origin {
+    domain_name = local.sslip_host
+    origin_id   = "argos-ec2-sslip"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_read_timeout    = 60
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    target_origin_id         = "argos-ec2-sslip"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD", "OPTIONS"]
+    compress                 = true
+    cache_policy_id          = data.aws_cloudfront_cache_policy.sin_cache[0].id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.todos_sin_host[0].id
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+    minimum_protocol_version       = "TLSv1.2_2021"
+  }
+
+  tags = {
+    Name = "argos-app-fallback"
+  }
+}
+
 resource "aws_iam_role" "ec2" {
   name = "argos-ec2-role"
   assume_role_policy = jsonencode({
@@ -240,7 +304,12 @@ resource "aws_s3_bucket_cors_configuration" "grabaciones" {
   bucket = aws_s3_bucket.grabaciones.id
   cors_rule {
     allowed_methods = ["PUT", "GET"]
-    allowed_origins = [var.public_base_url != "" ? var.public_base_url : "https://${replace(aws_eip.app.public_ip, ".", "-")}.sslip.io"]
+    allowed_origins = distinct(compact([
+      local.direct_ip_url,
+      local.sslip_url,
+      var.public_base_url,
+      var.cloudfront_fallback_enabled ? "https://${aws_cloudfront_distribution.app[0].domain_name}" : ""
+    ]))
     allowed_headers = ["*"]
     expose_headers  = ["ETag"]
     max_age_seconds = 300

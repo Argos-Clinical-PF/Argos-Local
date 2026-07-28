@@ -1,8 +1,20 @@
-{$PUBLIC_HOST} {
-	tls {
-		protocols tls1.3
-	}
-
+(app) {
 	encode zstd gzip
 	reverse_proxy frontend:5173
+}
+
+https://{$PUBLIC_IP} {
+	tls /etc/letsencrypt/live/{$PUBLIC_IP}/fullchain.pem /etc/letsencrypt/live/{$PUBLIC_IP}/privkey.pem {
+		protocols tls1.2 tls1.3
+	}
+
+	import app
+}
+
+{$PUBLIC_HOST} {
+	tls {
+		protocols tls1.2 tls1.3
+	}
+
+	import app
 }
