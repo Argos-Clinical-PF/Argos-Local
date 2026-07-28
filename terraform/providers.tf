@@ -48,8 +48,14 @@ variable "gpu_instance_type" {
 }
 
 variable "public_base_url" {
-  description = "Origen HTTPS permitido. Vacio usa sslip.io sobre la Elastic IP."
+  description = "Origen HTTPS adicional permitido. Vacio usa los endpoints administrados por Terraform."
   default     = ""
+}
+
+variable "cloudfront_fallback_enabled" {
+  description = "Publica un endpoint TLS/DNS estable de CloudFront mientras Route 53 Domains esta bloqueado."
+  type        = bool
+  default     = false
 }
 
 variable "monthly_budget_usd" {
