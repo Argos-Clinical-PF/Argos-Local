@@ -1,3 +1,9 @@
+{
+	# Los clientes que acceden mediante una IP literal pueden omitir SNI.
+	# En ese caso Caddy debe seleccionar explicitamente el certificado IP.
+	default_sni {$PUBLIC_IP}
+}
+
 (app) {
 	encode zstd gzip
 	reverse_proxy frontend:5173
