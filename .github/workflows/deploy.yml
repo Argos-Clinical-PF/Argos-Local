@@ -67,6 +67,10 @@ jobs:
           repository: Argos-Clinical-PF/Argos-Local
           ref: main
 
+      - name: Resolver version inmutable del bundle
+        id: bundle
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Configurar credenciales AWS mediante OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -158,7 +162,7 @@ jobs:
             esac
             mv next.json manifest.json
           fi
-          jq --arg release "$RELEASE_ID" --arg bundle "sha-${GITHUB_SHA}" \
+          jq --arg release "$RELEASE_ID" --arg bundle "sha-${{ steps.bundle.outputs.sha }}" \
             '.releaseId=$release | .bundle=$bundle' manifest.json > candidate.json
           {
             echo "release_id=$RELEASE_ID"
