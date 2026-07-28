@@ -1,6 +1,20 @@
 output "url" {
   description = "URL pública de ARGOS"
-  value       = "https://${replace(aws_eip.app.public_ip, ".", "-")}.sslip.io"
+  value = (
+    var.cloudfront_fallback_enabled
+    ? "https://${aws_cloudfront_distribution.app[0].domain_name}"
+    : (var.public_base_url != "" ? var.public_base_url : local.direct_ip_url)
+  )
+}
+
+output "direct_ip_url" {
+  description = "URL HTTPS sin dependencia de DNS, respaldada por certificado IP de corta duracion"
+  value       = local.direct_ip_url
+}
+
+output "origin_url" {
+  description = "Origen HTTPS directo usado por CloudFront y para contingencia"
+  value       = local.sslip_url
 }
 
 output "ec2_public_ip" {

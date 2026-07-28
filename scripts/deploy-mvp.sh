@@ -34,6 +34,13 @@ ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
+IMDS_TOKEN="$(curl --fail --silent --show-error --request PUT \
+  --header 'X-aws-ec2-metadata-token-ttl-seconds: 60' \
+  http://169.254.169.254/latest/api/token)"
+PUBLIC_IP="$(curl --fail --silent --show-error \
+  --header "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+  http://169.254.169.254/latest/meta-data/public-ipv4)"
+
 DEMO_GPU="$(get_parameter_optional demo-gpu)"
 DEMO_GPU="${DEMO_GPU:-false}"
 if [ "$DEMO_GPU" = "true" ]; then
@@ -59,8 +66,20 @@ umask 077
   printf 'TRANSCRIPCION_TAG=%s\n' "$TRANSCRIPCION_TAG"
   printf 'EMOCIONES_TAG=%s\n' "$EMOCIONES_TAG"
   PUBLIC_BASE_URL="$(get_parameter public-base-url)"
+  ORIGIN_BASE_URL="$(get_parameter_optional origin-base-url)"
+  ORIGIN_BASE_URL="${ORIGIN_BASE_URL:-$PUBLIC_BASE_URL}"
+  if [ "$ORIGIN_BASE_URL" = "https://$PUBLIC_IP" ]; then
+    ORIGIN_BASE_URL="https://${PUBLIC_IP//./-}.sslip.io"
+  fi
   printf 'PUBLIC_BASE_URL=%s\n' "$PUBLIC_BASE_URL"
-  printf 'PUBLIC_HOST=%s\n' "${PUBLIC_BASE_URL#https://}"
+  printf 'PUBLIC_HOST=%s\n' "${ORIGIN_BASE_URL#https://}"
+  printf 'PUBLIC_IP=%s\n' "$PUBLIC_IP"
+  if [ "$ORIGIN_BASE_URL" = "$PUBLIC_BASE_URL" ]; then
+    printf 'CORS_ALLOWED_ORIGINS=%s,https://%s\n' "$PUBLIC_BASE_URL" "$PUBLIC_IP"
+  else
+    printf 'CORS_ALLOWED_ORIGINS=%s,%s,https://%s\n' \
+      "$PUBLIC_BASE_URL" "$ORIGIN_BASE_URL" "$PUBLIC_IP"
+  fi
   printf 'POSTGRES_DB=argos_clinical\n'
   printf 'POSTGRES_USER=argos_app\n'
   printf 'POSTGRES_PASSWORD=%s\n' "$(get_parameter postgres-password)"
@@ -73,6 +92,9 @@ umask 077
   printf 'WHISPER_COMPUTE_TYPE=%s\n' "$WHISPER_COMPUTE_VALUE"
   printf 'WHISPER_IDIOMA=es\n'
   printf 'WHISPER_BEAM_SIZE=3\n'
+  printf 'WHISPER_REFINEMENT_BEAM_SIZE=5\n'
+  printf 'WHISPER_HOTWORDS=\n'
+  printf 'WHISPER_MAX_REFINEMENT_AUDIO_BYTES=134217728\n'
   printf 'WHISPER_CPU_THREADS=4\n'
   printf 'WHISPER_NUM_WORKERS=2\n'
   printf 'WHISPER_MAX_CONCURRENT_INFERENCES=2\n'
@@ -90,7 +112,16 @@ umask 077
   printf 'AWS_REGION=%s\n' "$REGION"
   printf 'RECORDINGS_BUCKET=argos-mvp-grabaciones-%s\n' "$ACCOUNT_ID"
   printf 'RECORDINGS_KMS_KEY_ID=alias/aws/s3\n'
-  printf 'EMOCIONES_REQUIRE_FACE_TRACKING=%s\n' "$( [ "$DEMO_GPU" = "true" ] && echo true || echo false )"
+  printf 'RECORDINGS_MAX_BYTES=2147483648\n'
+  printf 'PROCESSING_AUDIO_ENABLED=true\n'
+  printf 'PROCESSING_AUDIO_MAX_RETENTION_HOURS=2\n'
+  printf 'PROCESSING_AUDIO_MAX_BYTES=134217728\n'
+  printf 'TRANSCRIPCION_REALTIME_TIMEOUT_SECONDS=20\n'
+  printf 'TRANSCRIPCION_REALTIME_RETRIES=3\n'
+  printf 'TRANSCRIPCION_REALTIME_BACKOFF_MS=1000\n'
+  printf 'TRANSCRIPCION_REFINEMENT_TIMEOUT_MINUTES=120\n'
+  printf 'EMOCIONES_REQUIRE_FACE_TRACKING=true\n'
+  printf 'EMOCIONES_AUDIO_ENABLED=false\n'
 } > .env
 
 COMPOSE_FILES=(-f docker-compose.prod.yml)
@@ -106,6 +137,7 @@ docker logout "$ECR_REGISTRY" >/dev/null
 # En una unica EC2 el reemplazo concurrente puede dejar referencias a contenedores
 # ya eliminados. Down preserva los volumenes y vuelve el release determinista.
 docker compose "${COMPOSE_FILES[@]}" --env-file .env down --remove-orphans --timeout 30
+PUBLIC_IP="$PUBLIC_IP" "$APP_DIR/refresh-ip-certificate.sh" --certificate-only
 docker compose "${COMPOSE_FILES[@]}" --env-file .env up -d --remove-orphans
 docker image prune -f || true
 

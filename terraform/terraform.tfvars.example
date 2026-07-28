@@ -7,5 +7,8 @@ instance_type = "c7i.2xlarge"
 demo_gpu         = false
 gpu_instance_type = "g5.xlarge"
 
+# Solo habilitar despues de que AWS Support verifique la cuenta.
+cloudfront_fallback_enabled = false
+
 monthly_budget_usd = 25
 budget_email       = "95001@sistemas.frc.utn.edu.ar"
