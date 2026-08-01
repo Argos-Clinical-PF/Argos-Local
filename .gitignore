@@ -1,4 +1,8 @@
 .env
+# Copias de seguridad del .env: contienen los mismos secretos que el original.
+.env.backup*
+.env.bak
+.env.*.local
 .DS_Store
 terraform/.terraform/
 terraform/.build/

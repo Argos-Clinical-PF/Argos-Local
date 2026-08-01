@@ -122,7 +122,10 @@ services:
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
-      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+      # beam 3 en vivo (seleccion_mvp del benchmark versionado: mismo WER que beam 5, mejor
+      # RTF p95). beam 5 se conserva solo para el refinamiento post-sesion, que no compite
+      # con la captura en tiempo real.
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-3}
       WHISPER_REFINEMENT_BEAM_SIZE: ${WHISPER_REFINEMENT_BEAM_SIZE:-5}
       WHISPER_HOTWORDS: ${WHISPER_HOTWORDS:-}
       WHISPER_MAX_REFINEMENT_AUDIO_BYTES: ${WHISPER_MAX_REFINEMENT_AUDIO_BYTES:-134217728}
