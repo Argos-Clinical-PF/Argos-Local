@@ -62,7 +62,7 @@ services:
     image: ${ECR_REGISTRY}/argos-emociones:${EMOCIONES_TAG}
     container_name: argos-emociones
     environment:
-      EMOCIONES_MODEL_ID: emotiefflib-enet-b0-8-vgaf
+      EMOCIONES_MODEL_ID: emotiefflib-enet-b0-8-va-mtl
       EMOCIONES_AUDIO_MODEL_ID: argos-audio-cnn-ravdess
       EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
       EMOCIONES_MOCK: "false"
