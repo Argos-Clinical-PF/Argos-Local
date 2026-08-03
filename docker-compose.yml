@@ -119,6 +119,7 @@ services:
     container_name: argos-transcripcion
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-true}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
@@ -151,7 +152,9 @@ services:
       dockerfile: servicio-emociones/Dockerfile
     container_name: argos-emociones
     environment:
-      EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-vgaf}
+      EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-va-mtl}
+      EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-true}
+      EMOCIONES_FUSION_UMBRAL: ${EMOCIONES_FUSION_UMBRAL:-0.0}
       EMOCIONES_AUDIO_MODEL_ID: ${EMOCIONES_AUDIO_MODEL_ID:-argos-audio-cnn-ravdess}
       EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
