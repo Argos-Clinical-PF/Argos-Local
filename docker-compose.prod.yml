@@ -64,6 +64,9 @@ services:
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: emotiefflib-enet-b0-8-va-mtl
+      # Calibracion de la confianza visual: se mueven JUNTAS. Ver .env.example.
+      EMOCIONES_VIDEO_TEMPERATURE: ${EMOCIONES_VIDEO_TEMPERATURE:-2.40}
+      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.291}
       EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-true}
       EMOCIONES_FUSION_UMBRAL: ${EMOCIONES_FUSION_UMBRAL:-0.0}
       EMOCIONES_AUDIO_MODEL_ID: argos-audio-cnn-ravdess
