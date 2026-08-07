@@ -37,6 +37,12 @@ services:
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-true}
+      # ARGOS-169 / ADR-025: encoder DEDICADO a /embed. NO reemplaza a WHISPER_MODEL, que
+      # sigue transcribiendo: el adaptado degrada el WER en +0,2535 -12,7 veces el umbral-
+      # porque empuja al decoder a bucles de repeticion. Conviven; cuesta 179 MB de RSS.
+      # El binario lo construye la imagen desde el checkpoint versionado de 8 MB.
+      WHISPER_EMBEDDING_MODEL: ${WHISPER_EMBEDDING_MODEL:-/modelos/whisper-argos-ser-int8}
+      WHISPER_ENCODER_ID: ${WHISPER_ENCODER_ID:-whisper-small-argos-ser-int8}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
@@ -68,6 +74,10 @@ services:
       EMOCIONES_VIDEO_TEMPERATURE: ${EMOCIONES_VIDEO_TEMPERATURE:-2.40}
       EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.291}
       EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-true}
+      # v3: entrenada sobre el encoder adaptado. Declara `encoder_audio` y RECHAZA con 400 los
+      # embeddings de otro encoder, asi que va atada a WHISPER_EMBEDDING_MODEL de arriba.
+      # UAR 0,7839 -> 0,8099 y `sad` 0,521 -> 0,635, que era la advertencia clinica registrada.
+      EMOCIONES_FUSION_ARTEFACTO: ${EMOCIONES_FUSION_ARTEFACTO:-/app/angel/artefactos/fusion-intermedia-v3.npz}
       EMOCIONES_FUSION_UMBRAL: ${EMOCIONES_FUSION_UMBRAL:-0.0}
       EMOCIONES_AUDIO_MODEL_ID: argos-audio-cnn-ravdess
       EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
@@ -102,6 +112,10 @@ services:
       EMOCIONES_ENABLED: "true"
       EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
       EMOCIONES_TIMEOUT_MS: "5000"
+      # ARGOS-169 / ADR-025: enciende la ruta /embed + /infer/fusion. Sin esto los otros dos
+      # cambios quedan cargados y sin usar, que es exactamente lo que pasaba con la fusion v2.
+      # Revertir: poner false y reiniciar el backend. Segundos, sin redesplegar imagenes.
+      ARGOS_FUSION_INTERMEDIA_ENABLED: ${ARGOS_FUSION_INTERMEDIA_ENABLED:-true}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ACCESS_MINUTES: "15"
       JWT_ISSUER: argos-clinical

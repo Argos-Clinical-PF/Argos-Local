@@ -37,6 +37,10 @@ services:
       TRANSCRIPCION_REALTIME_BACKOFF_MS: ${TRANSCRIPCION_REALTIME_BACKOFF_MS:-1000}
       EMOCIONES_SERVICE_URL: ${EMOCIONES_SERVICE_URL:-http://emociones:9010}
       EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
+      # ARGOS-169 / ADR-025: enciende la ruta /embed + /infer/fusion en el backend. Los TRES
+      # cambios van juntos -este, WHISPER_EMBEDDING_MODEL y la fusion v3- o la guarda de
+      # encoder rechaza los embeddings. Revertir: poner false y reiniciar el backend.
+      ARGOS_FUSION_INTERMEDIA_ENABLED: ${ARGOS_FUSION_INTERMEDIA_ENABLED:-false}
       EMOCIONES_TIMEOUT_MS: ${EMOCIONES_TIMEOUT_MS:-5000}
       ARGOS_TEMAS_PROVIDER: ${ARGOS_TEMAS_PROVIDER:-LOCAL}
       ARGOS_TEMAS_MIN_CONFIDENCE: ${ARGOS_TEMAS_MIN_CONFIDENCE:-0.60}
@@ -115,11 +119,22 @@ services:
 
   transcripcion:
     build:
-      context: ../Argos-Entrenamiento/servicio-transcripcion
+      # Contexto RAIZ y no servicio-transcripcion/ (ARGOS-169): la etapa constructora del
+      # Dockerfile necesita el checkpoint de angel/exported_models/ para generar el encoder
+      # emocional durante la build. El modelo pesa 237 MB y GitHub rechaza archivos de mas de
+      # 100 MB, asi que se versiona la receta -8 MB- y el binario se construye.
+      context: ../Argos-Entrenamiento
+      dockerfile: servicio-transcripcion/Dockerfile
+      target: production
     container_name: argos-transcripcion
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-true}
+      # Encoder DEDICADO a /embed. Vacio = /embed usa el modelo de transcripcion, que es el
+      # comportamiento historico. NO reemplaza a WHISPER_MODEL: el encoder adaptado degrada la
+      # transcripcion en +0,2535 de WER (ADR-025), asi que los dos conviven.
+      WHISPER_EMBEDDING_MODEL: ${WHISPER_EMBEDDING_MODEL:-}
+      WHISPER_ENCODER_ID: ${WHISPER_ENCODER_ID:-ctranslate2-whisper-small-int8}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
