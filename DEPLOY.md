@@ -24,11 +24,16 @@ reales hasta completar la revisión integral de privacidad y seguridad.
 Desde `Argos-Local/terraform`:
 
 ```bash
-AWS_PROFILE=argos-facu terraform init
-AWS_PROFILE=argos-facu terraform plan
-AWS_PROFILE=argos-facu terraform apply
+export AWS_PROFILE=argos-<tu-nombre>   # cada integrante tiene el suyo
+terraform init
+terraform plan
+terraform apply
 terraform output
 ```
+
+El nombre del perfil **no se hardcodea**: cada integrante configura el suyo y lo declara con
+`AWS_PROFILE`. Si falla con `Unable to locate credentials`, listar los disponibles con
+`aws configure list-profiles`.
 
 Terraform administra EC2/EIP, ECR, S3 operativo, SSM, IAM y el rol
 OIDC `argos-github-actions`.
@@ -61,6 +66,44 @@ Cada repositorio de servicio contiene `.github/workflows/ci-cd.yml`:
 - `Deploy MVP`: despliegue completo manual o ante cambios del Compose.
 - `Operate MVP`: iniciar, detener o consultar el estado de la instancia.
 - `Release MVP`: workflow reutilizable por los servicios, con manifiesto y rollback.
+
+## El Compose que manda es `docker-compose.prod.yml`
+
+El deploy sube ese archivo a S3 y la EC2 lo ejecuta contra las imágenes de ECR. **Un cambio de
+configuración que solo toque `docker-compose.yml` no llega a producción.**
+
+Los defaults de producción se resuelven en tres niveles, de menor a mayor prioridad:
+
+1. el default `${VAR:-valor}` del propio `docker-compose.prod.yml`;
+2. un `.env` en el disco de la instancia, si existe;
+3. las variables que inyecta el workflow.
+
+## Encoder de audio adaptado (ARGOS-169 / ADR-025)
+
+Desde el 2026-08-06 `transcripcion` sirve **dos** modelos: `small` de fábrica para
+`/transcribir` y `whisper-small-argos-ser-int8` **solo** para `/embed`.
+
+El binario no está en Git —pesa 237 MB y GitHub corta en 100 MB—, así que **la imagen lo
+construye** desde un checkpoint de 8 MB y **verifica** que reproduce el modelo evaluado antes de
+seguir. Si no reproduce, la build falla y no se publica nada. La imagen pasa de 353 a 554 MB.
+
+Tres variables encienden la ruta y **van juntas**:
+
+| Servicio | Variable | Valor en producción |
+|---|---|---|
+| transcripcion | `WHISPER_EMBEDDING_MODEL` | `/modelos/whisper-argos-ser-int8` |
+| emociones | `EMOCIONES_FUSION_ARTEFACTO` | `…/fusion-intermedia-v3.npz` |
+| backend | `ARGOS_FUSION_INTERMEDIA_ENABLED` | `true` |
+
+**Orden de despliegue:** transcripción primero —expone `/embed` con el encoder nuevo y, como
+nadie lo consume todavía, no cambia nada—, después emociones con la v3, y por último el backend.
+
+**Reversión:** `ARGOS_FUSION_INTERMEDIA_ENABLED=false` y reiniciar el backend. Segundos, sin
+redesplegar imágenes.
+
+La fusión v3 declara con qué encoder fue entrenada y **rechaza con 400** los embeddings de otro,
+así que desplegar una pieza sin las otras falla de forma ruidosa en vez de producir emociones
+plausibles sobre un espacio latente equivocado.
 
 ## Operación diaria
 

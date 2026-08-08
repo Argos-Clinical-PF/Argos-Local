@@ -13,11 +13,12 @@ ARGOS/
   Argos-Local/
   Argos-Backend/
   Argos-Frontend/
+  Argos-Entrenamiento/
   Argos-Documentacion/
   Argos-ModeloDatos/
 ```
 
-En el entorno local actual del proyecto, esa estructura puede estar dentro de una carpeta contenedora como `02_argos_repo/`. Lo importante es que `Argos-Local`, `Argos-Backend` y `Argos-Frontend` sean hermanos.
+En el entorno local actual del proyecto, esa estructura puede estar dentro de una carpeta contenedora como `02_argos_repo/`. Lo importante es que `Argos-Local`, `Argos-Backend`, `Argos-Frontend` y `Argos-Entrenamiento` sean hermanos: el compose construye desde rutas relativas y sin `Argos-Entrenamiento` no levantan los servicios de IA.
 
 ## Clonar repos
 
@@ -27,6 +28,7 @@ Desde la carpeta donde quieras trabajar con ARGOS:
 git clone https://github.com/Argos-Clinical-PF/Argos-Local.git
 git clone https://github.com/Argos-Clinical-PF/Argos-Backend.git
 git clone https://github.com/Argos-Clinical-PF/Argos-Frontend.git
+git clone https://github.com/Argos-Clinical-PF/Argos-Entrenamiento.git
 git clone https://github.com/Argos-Clinical-PF/Argos-Documentacion.git
 git clone https://github.com/Argos-Clinical-PF/Argos-ModeloDatos.git
 ```
@@ -68,7 +70,14 @@ Servicios expuestos:
 - Backend: http://localhost:8080
 - Swagger UI: http://localhost:8080/swagger-ui.html
 - Health backend: http://localhost:8080/api/health
+- Transcripcion: http://localhost:9000/health
+- Emociones: http://localhost:9010/health
 - PostgreSQL: localhost:5432
+
+> **La primera build de `transcripcion` tarda.** La imagen construye el encoder de audio
+> adaptado en una etapa aparte —instala torch, fusiona LoRA, convierte a CTranslate2 y verifica
+> el resultado— porque el modelo pesa 237 MB y no puede vivir en Git. Las builds siguientes usan
+> cache.
 
 ## Comandos principales
 
@@ -114,10 +123,45 @@ docker compose down -v
 
 `docker-compose.yml` usa rutas relativas:
 
-- Backend: `../Argos-Backend`
-- Frontend: `../Argos-Frontend`
+| Servicio | Contexto | Dockerfile |
+|---|---|---|
+| Backend | `../Argos-Backend` | por defecto, `target: development` |
+| Frontend | `../Argos-Frontend` | por defecto, `target: development` |
+| Transcripcion | `../Argos-Entrenamiento` | `servicio-transcripcion/Dockerfile`, `target: production` |
+| Emociones | `../Argos-Entrenamiento` | `servicio-emociones/Dockerfile` |
 
-Por eso `Argos-Local` debe mantenerse como carpeta hermana de ambos repos.
+Por eso `Argos-Local` debe mantenerse como carpeta hermana de los tres repos de codigo.
+
+**El contexto de los servicios de IA es la raiz de `Argos-Entrenamiento`, no la carpeta del
+servicio.** La etapa que construye el encoder emocional necesita `angel/` —el checkpoint y los
+scripts de export y verificacion—, que vive fuera de `servicio-transcripcion/`.
+
+## Los dos compose
+
+| Archivo | Para que |
+|---|---|
+| `docker-compose.yml` | Entorno local. Construye las imagenes desde los repos hermanos |
+| `docker-compose.prod.yml` | **El que usa el deploy.** Consume imagenes ya publicadas en ECR por tag |
+
+Un cambio de configuracion que solo toque `docker-compose.yml` **no llega a produccion**.
+
+### La fusion emocional viene apagada en local, encendida en produccion
+
+| Variable | Local | Produccion |
+|---|---|---|
+| `WHISPER_EMBEDDING_MODEL` | vacio | `/modelos/whisper-argos-ser-int8` |
+| `EMOCIONES_FUSION_ARTEFACTO` | v3 | v3 |
+| `ARGOS_FUSION_INTERMEDIA_ENABLED` | `false` | `true` |
+
+Para encenderla en local alcanza con copiar `.env.example`, que ya trae las tres con el valor de
+produccion, y levantar de nuevo.
+
+**Las tres van juntas.** La fusion v3 declara con que encoder fue entrenada y **rechaza con 400**
+los embeddings de otro, asi que encender una sola falla de forma ruidosa —que es lo que se busca—
+en vez de devolver emociones plausibles calculadas sobre un espacio latente equivocado.
+
+Para revertir: `ARGOS_FUSION_INTERMEDIA_ENABLED=false` y reiniciar el backend. Segundos, sin
+redesplegar imagenes.
 
 ## Notas de configuracion
 
