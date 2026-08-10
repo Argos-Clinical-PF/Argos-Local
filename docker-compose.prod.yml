@@ -146,6 +146,12 @@ services:
       PROCESSING_AUDIO_MAX_RETENTION_HOURS: "2"
       PROCESSING_AUDIO_MAX_BYTES: "134217728"
       TRANSCRIPCION_REFINEMENT_TIMEOUT_MINUTES: "120"
+      # ARGOS-110 (ADR-026). Agrupamiento de voces en sesiones presenciales. Requiere que la imagen
+      # de transcripcion traiga el encoder WeSpeaker: encenderla contra una imagen que no lo tiene
+      # no rompe nada, simplemente no agrupa.
+      ARGOS_DIARIZACION_ENABLED: ${ARGOS_DIARIZACION_ENABLED:-false}
+      # Cuanto espera la compuerta humana antes de continuar sola con los hablantes sin verificar.
+      ARGOS_ESPERA_ASIGNACION_HORAS: ${ARGOS_ESPERA_ASIGNACION_HORAS:-24}
       AWS_REGION: ${AWS_REGION:-us-east-1}
     volumes:
       - argos-profile-uploads:/app/uploads/perfiles

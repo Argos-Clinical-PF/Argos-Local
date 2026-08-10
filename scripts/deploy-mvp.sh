@@ -122,6 +122,11 @@ umask 077
   printf 'TRANSCRIPCION_REFINEMENT_TIMEOUT_MINUTES=120\n'
   printf 'EMOCIONES_REQUIRE_FACE_TRACKING=true\n'
   printf 'EMOCIONES_AUDIO_ENABLED=false\n'
+  # ARGOS-110 (ADR-026). Este .env se regenera entero en cada deploy, asi que editarlo a mano en la
+  # instancia no sobrevive al siguiente: la forma de encender el agrupamiento es
+  # `ARGOS_DIARIZACION_ENABLED=true ./scripts/deploy-mvp.sh`.
+  printf 'ARGOS_DIARIZACION_ENABLED=%s\n' "${ARGOS_DIARIZACION_ENABLED:-false}"
+  printf 'ARGOS_ESPERA_ASIGNACION_HORAS=%s\n' "${ARGOS_ESPERA_ASIGNACION_HORAS:-24}"
 } > .env
 
 COMPOSE_FILES=(-f docker-compose.prod.yml)
