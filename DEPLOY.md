@@ -105,6 +105,40 @@ La fusión v3 declara con qué encoder fue entrenada y **rechaza con 400** los e
 así que desplegar una pieza sin las otras falla de forma ruidosa en vez de producir emociones
 plausibles sobre un espacio latente equivocado.
 
+## Agrupamiento de voces (ARGOS-110 / ADR-026)
+
+Apagado por defecto. Enciende dos cosas a la vez: el agrupamiento de voces en sesiones
+presenciales, y la **compuerta** que frena la nota clínica hasta que el profesional dice qué grupo
+es el paciente.
+
+La bandera **sale de SSM, no de una variable de entorno**: el workflow de deploy invoca
+`deploy-mvp.sh` con una lista fija de variables —solo los tags y la región—, así que una variable
+de entorno nunca llegaría. Mismo patrón que `demo-gpu`.
+
+```bash
+aws ssm put-parameter --name /argos/mvp/diarizacion-enabled \
+  --value true --type String --overwrite
+# y volver a desplegar para que el .env de la instancia se regenere
+```
+
+**El `.env` de la instancia se regenera entero en cada deploy**, así que editarlo a mano no
+sobrevive al siguiente.
+
+**Orden de despliegue:** `Argos-Local` a `main` **primero** —el workflow toma el Compose y el script
+de `main`, así que si va después el backend arranca sin las variables—, después transcripción
+—trae el encoder WeSpeaker y, como nadie pide agrupar todavía, no cambia nada—, y por último el
+backend.
+
+**Reversión:** poner el parámetro en `false` y redesplegar. Las sesiones que quedaron esperando
+confirmación se destraban solas al vencer el plazo de `ARGOS_ESPERA_ASIGNACION_HORAS` (24 h por
+defecto), o antes con el botón "Continuar sin asignar".
+
+**Qué se puede medir con esto encendido, y qué no.** El DER no: necesita el audio más una anotación
+de referencia, y el audio efímero se borra apenas termina el procesamiento. Sí se pueden medir la
+tasa de abstención, la cobertura, la distribución del margen contra el 0,30 adoptado, y —la más
+útil— cuántos fragmentos corrige el profesional a mano después de asignar, que queda registrado en
+`origen_hablante = 'PROFESIONAL'`.
+
 ## Operación diaria
 
 Para una demo:
