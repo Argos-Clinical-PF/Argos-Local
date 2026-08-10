@@ -41,6 +41,11 @@ PUBLIC_IP="$(curl --fail --silent --show-error \
   --header "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
   http://169.254.169.254/latest/meta-data/public-ipv4)"
 
+DIARIZACION_ENABLED="$(get_parameter_optional diarizacion-enabled)"
+DIARIZACION_ENABLED="${DIARIZACION_ENABLED:-false}"
+ESPERA_ASIGNACION_HORAS="$(get_parameter_optional espera-asignacion-horas)"
+ESPERA_ASIGNACION_HORAS="${ESPERA_ASIGNACION_HORAS:-24}"
+
 DEMO_GPU="$(get_parameter_optional demo-gpu)"
 DEMO_GPU="${DEMO_GPU:-false}"
 if [ "$DEMO_GPU" = "true" ]; then
@@ -122,6 +127,16 @@ umask 077
   printf 'TRANSCRIPCION_REFINEMENT_TIMEOUT_MINUTES=120\n'
   printf 'EMOCIONES_REQUIRE_FACE_TRACKING=true\n'
   printf 'EMOCIONES_AUDIO_ENABLED=false\n'
+  # ARGOS-110 (ADR-026). Sale de SSM y no de una variable de entorno porque el workflow de deploy
+  # invoca este script con una lista fija de variables -solo los tags y la region-, asi que una
+  # variable de entorno nunca llegaria y la bandera quedaria clavada en false.
+  #
+  # Mismo patron que demo-gpu. Encender sin tocar codigo ni workflow:
+  #   aws ssm put-parameter --name /argos/mvp/diarizacion-enabled --value true --type String --overwrite
+  # y volver a desplegar. Este .env se regenera entero en cada deploy, asi que editarlo a mano en la
+  # instancia no sobrevive al siguiente.
+  printf 'ARGOS_DIARIZACION_ENABLED=%s\n' "$DIARIZACION_ENABLED"
+  printf 'ARGOS_ESPERA_ASIGNACION_HORAS=%s\n' "$ESPERA_ASIGNACION_HORAS"
 } > .env
 
 COMPOSE_FILES=(-f docker-compose.prod.yml)
