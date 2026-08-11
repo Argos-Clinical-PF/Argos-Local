@@ -193,6 +193,10 @@ services:
       EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.291}
       EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-true}
       EMOCIONES_FUSION_UMBRAL: ${EMOCIONES_FUSION_UMBRAL:-0.45}
+      # Correccion por prior (angel/correccion_por_prior_fusion.py): 1.20 medido sobre RAVDESS con
+      # split fit/reporte disjunto en hablante. UAR 0,7795 -> 0,7917, recall 'neutral'
+      # 0,6250 -> 0,8125, 'sad' sin retroceder (0,6250 -> 0,6354). Revertir: poner en 0.
+      EMOCIONES_FUSION_TAU: ${EMOCIONES_FUSION_TAU:-1.20}
       EMOCIONES_AUDIO_MODEL_ID: ${EMOCIONES_AUDIO_MODEL_ID:-argos-audio-cnn-ravdess}
       EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
