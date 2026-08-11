@@ -42,6 +42,11 @@ services:
       # porque empuja al decoder a bucles de repeticion. Conviven; cuesta 179 MB de RSS.
       # El binario lo construye la imagen desde el checkpoint versionado de 8 MB.
       WHISPER_EMBEDDING_MODEL: ${WHISPER_EMBEDDING_MODEL:-/modelos/whisper-argos-ser-int8}
+      # ARGOS-110. El servicio tiene su propia bandera, distinta de la del backend: sin esto el
+      # backend pide agrupar, el servicio devuelve null porque la suya esta apagada, y el backend
+      # loguea "sin agrupamiento utilizable" y sigue. Cero clusters, la compuerta nunca dispara, y
+      # todo parece normal. Deriva de la misma variable para que haya un solo interruptor.
+      DIARIZACION_ENABLED: ${ARGOS_DIARIZACION_ENABLED:-false}
       WHISPER_ENCODER_ID: ${WHISPER_ENCODER_ID:-whisper-small-argos-ser-int8}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
