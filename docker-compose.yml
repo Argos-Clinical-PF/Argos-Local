@@ -45,13 +45,8 @@ services:
       # producción -este repo quedó atrasado, era el único de los tres que seguía en false-.
       # La fusión tardía (Java, FusionadorEmocional) queda como reversión funcional, no como
       # default: si aparecía en una sesión local era por esto, no por decisión del profesional.
-      #
-      # WHISPER_EMBEDDING_MODEL sigue vacío más abajo (línea ~138), así que /embed local usa el
-      # encoder de transcripción base, no el adaptado a SER. La guarda de encoder_compatible()
-      # rechazaría con 400 un embedding de audio real -en presencial no importa: el audio ambiente
-      # nunca llega a /embed (channels-first, ADR-014), así que esta bandera alcanza sola para
-      # esas sesiones-. Para fusión intermedia completa en virtual con audio real, hace falta
-      # además fijar WHISPER_EMBEDDING_MODEL al encoder adaptado.
+      # WHISPER_EMBEDDING_MODEL (más abajo) también quedó atrasado con el mismo patrón — corregido
+      # junto con esto.
       ARGOS_FUSION_INTERMEDIA_ENABLED: ${ARGOS_FUSION_INTERMEDIA_ENABLED:-true}
       EMOCIONES_TIMEOUT_MS: ${EMOCIONES_TIMEOUT_MS:-5000}
       ARGOS_TEMAS_PROVIDER: ${ARGOS_TEMAS_PROVIDER:-LOCAL}
@@ -144,10 +139,18 @@ services:
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-true}
-      # Encoder DEDICADO a /embed. Vacio = /embed usa el modelo de transcripcion, que es el
-      # comportamiento historico. NO reemplaza a WHISPER_MODEL: el encoder adaptado degrada la
-      # transcripcion en +0,2535 de WER (ADR-025), asi que los dos conviven.
-      WHISPER_EMBEDDING_MODEL: ${WHISPER_EMBEDDING_MODEL:-}
+      # Encoder DEDICADO a /embed. NO reemplaza a WHISPER_MODEL: el encoder adaptado degrada la
+      # transcripcion en +0,2535 de WER (ADR-025), asi que los dos conviven -uno transcribe, el
+      # otro solo alimenta la fusion emocional-.
+      #
+      # ARGOS-110: se apunta al mismo path que produccion. El build local ya usa target:
+      # production del mismo Dockerfile, y esa etapa depende de constructor-modelo -que genera y
+      # verifica por sha256 el checkpoint- pase lo que pase con esta variable: dejarla vacia no
+      # ahorraba tiempo de build, solo dejaba el resultado sin usar. Sin esto, /embed local caia
+      # en el fallback "usa el modelo de transcripcion", que ES un encoder distinto del que la
+      # guarda de compatibilidad (encoder_compatible en el servicio de emociones) espera para
+      # fusion intermedia: cualquier embedding de audio real se hubiera rechazado con 400.
+      WHISPER_EMBEDDING_MODEL: ${WHISPER_EMBEDDING_MODEL:-/modelos/whisper-argos-ser-int8}
       # ARGOS-110. Bandera propia del servicio, distinta de la del backend: sin esto el backend
       # pide agrupar y el servicio devuelve null en silencio. Deriva de la misma variable.
       DIARIZACION_ENABLED: ${ARGOS_DIARIZACION_ENABLED:-false}
