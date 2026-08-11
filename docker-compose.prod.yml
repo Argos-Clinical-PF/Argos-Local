@@ -84,6 +84,10 @@ services:
       # UAR 0,7839 -> 0,8099 y `sad` 0,521 -> 0,635, que era la advertencia clinica registrada.
       EMOCIONES_FUSION_ARTEFACTO: ${EMOCIONES_FUSION_ARTEFACTO:-/app/angel/artefactos/fusion-intermedia-v3.npz}
       EMOCIONES_FUSION_UMBRAL: ${EMOCIONES_FUSION_UMBRAL:-0.45}
+      # Correccion por prior (angel/correccion_por_prior_fusion.py): 1.20 medido sobre RAVDESS con
+      # split fit/reporte disjunto en hablante. UAR 0,7795 -> 0,7917, recall 'neutral'
+      # 0,6250 -> 0,8125, 'sad' sin retroceder (0,6250 -> 0,6354). Revertir: poner en 0.
+      EMOCIONES_FUSION_TAU: ${EMOCIONES_FUSION_TAU:-1.20}
       EMOCIONES_AUDIO_MODEL_ID: argos-audio-cnn-ravdess
       EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
       EMOCIONES_MOCK: "false"
