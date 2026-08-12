@@ -126,7 +126,6 @@ umask 077
   printf 'TRANSCRIPCION_REALTIME_BACKOFF_MS=1000\n'
   printf 'TRANSCRIPCION_REFINEMENT_TIMEOUT_MINUTES=120\n'
   printf 'EMOCIONES_REQUIRE_FACE_TRACKING=true\n'
-  printf 'EMOCIONES_AUDIO_ENABLED=false\n'
   # ARGOS-110 (ADR-026). Sale de SSM y no de una variable de entorno porque el workflow de deploy
   # invoca este script con una lista fija de variables -solo los tags y la region-, asi que una
   # variable de entorno nunca llegaria y la bandera quedaria clavada en false.

@@ -88,8 +88,6 @@ services:
       # split fit/reporte disjunto en hablante. UAR 0,7795 -> 0,7917, recall 'neutral'
       # 0,6250 -> 0,8125, 'sad' sin retroceder (0,6250 -> 0,6354). Revertir: poner en 0.
       EMOCIONES_FUSION_TAU: ${EMOCIONES_FUSION_TAU:-1.20}
-      EMOCIONES_AUDIO_MODEL_ID: argos-audio-cnn-ravdess
-      EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
       EMOCIONES_MOCK: "false"
       EMOCIONES_STRICT_LOAD: "true"
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-true}
@@ -119,7 +117,6 @@ services:
       TRANSCRIPCION_REALTIME_BACKOFF_MS: ${TRANSCRIPCION_REALTIME_BACKOFF_MS:-1000}
       EMOCIONES_SERVICE_URL: http://emociones:9010
       EMOCIONES_ENABLED: "true"
-      EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
       EMOCIONES_TIMEOUT_MS: "5000"
       # ARGOS-169 / ADR-025: enciende la ruta /embed + /infer/fusion. Sin esto los otros dos
       # cambios quedan cargados y sin usar, que es exactamente lo que pasaba con la fusion v2.
