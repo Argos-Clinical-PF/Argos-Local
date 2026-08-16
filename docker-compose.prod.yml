@@ -36,11 +36,10 @@ services:
     container_name: argos-transcripcion
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
-      WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-true}
-      # ARGOS-169 / ADR-025: encoder DEDICADO a /embed. NO reemplaza a WHISPER_MODEL, que
-      # sigue transcribiendo: el adaptado degrada el WER en +0,2535 -12,7 veces el umbral-
-      # porque empuja al decoder a bucles de repeticion. Conviven; cuesta 179 MB de RSS.
-      # El binario lo construye la imagen desde el checkpoint versionado de 8 MB.
+      # ARGOS-PF: apagada como primer paso de la eliminación de la fusión intermedia y de SER
+      # (Speech Emotion Recognition) — ver ADR-027. El endpoint /embed y el encoder adaptado se
+      # eliminan por completo en el mismo cambio.
+      WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-false}
       WHISPER_EMBEDDING_MODEL: ${WHISPER_EMBEDDING_MODEL:-/modelos/whisper-argos-ser-int8}
       # ARGOS-110. El servicio tiene su propia bandera, distinta de la del backend: sin esto el
       # backend pide agrupar, el servicio devuelve null porque la suya esta apagada, y el backend
@@ -78,7 +77,9 @@ services:
       # Calibracion de la confianza visual: se mueven JUNTAS. Ver .env.example.
       EMOCIONES_VIDEO_TEMPERATURE: ${EMOCIONES_VIDEO_TEMPERATURE:-2.40}
       EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.291}
-      EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-true}
+      # ARGOS-PF: apagada junto con WHISPER_EMBEDDING_ENABLED de transcripción y
+      # ARGOS_FUSION_INTERMEDIA_ENABLED del backend — ver ADR-027.
+      EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-false}
       # v3: entrenada sobre el encoder adaptado. Declara `encoder_audio` y RECHAZA con 400 los
       # embeddings de otro encoder, asi que va atada a WHISPER_EMBEDDING_MODEL de arriba.
       # UAR 0,7839 -> 0,8099 y `sad` 0,521 -> 0,635, que era la advertencia clinica registrada.
@@ -118,10 +119,11 @@ services:
       EMOCIONES_SERVICE_URL: http://emociones:9010
       EMOCIONES_ENABLED: "true"
       EMOCIONES_TIMEOUT_MS: "5000"
-      # ARGOS-169 / ADR-025: enciende la ruta /embed + /infer/fusion. Sin esto los otros dos
-      # cambios quedan cargados y sin usar, que es exactamente lo que pasaba con la fusion v2.
-      # Revertir: poner false y reiniciar el backend. Segundos, sin redesplegar imagenes.
-      ARGOS_FUSION_INTERMEDIA_ENABLED: ${ARGOS_FUSION_INTERMEDIA_ENABLED:-true}
+      # ARGOS-PF: apagada como primer paso de la eliminación de la fusión intermedia y de SER
+      # (Speech Emotion Recognition) — ver ADR-027. En false el backend usa la salida DIRECTA
+      # del modelo visual (/infer/video), que es además lo que corre siempre en sesión
+      # presencial, con o sin esta bandera.
+      ARGOS_FUSION_INTERMEDIA_ENABLED: ${ARGOS_FUSION_INTERMEDIA_ENABLED:-false}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ACCESS_MINUTES: "15"
       JWT_ISSUER: argos-clinical

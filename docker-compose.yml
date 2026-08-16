@@ -36,19 +36,13 @@ services:
       TRANSCRIPCION_REALTIME_RETRIES: ${TRANSCRIPCION_REALTIME_RETRIES:-3}
       TRANSCRIPCION_REALTIME_BACKOFF_MS: ${TRANSCRIPCION_REALTIME_BACKOFF_MS:-1000}
       EMOCIONES_SERVICE_URL: ${EMOCIONES_SERVICE_URL:-http://emociones:9010}
-      # ARGOS-169 / ADR-025: enciende la ruta /embed + /infer/fusion en el backend. Los TRES
-      # cambios van juntos -este, WHISPER_EMBEDDING_MODEL y la fusion v3- o la guarda de
-      # encoder rechaza los embeddings. Revertir: poner false y reiniciar el backend.
-      #
-      # ARGOS-110: fusión intermedia pasa a ser el default también en local, igual que en
-      # producción -este repo quedó atrasado, era el único de los tres que seguía en false-.
-      # WHISPER_EMBEDDING_MODEL (más abajo) también quedó atrasado con el mismo patrón — corregido
-      # junto con esto.
-      #
-      # ARGOS-PF: la reversión ya NO es "volver a la fusión tardía" — esa se eliminó del código.
-      # En false el backend usa la salida DIRECTA del modelo visual (/infer/video), que es además
-      # lo que corre siempre en sesión presencial, con o sin esta bandera.
-      ARGOS_FUSION_INTERMEDIA_ENABLED: ${ARGOS_FUSION_INTERMEDIA_ENABLED:-true}
+      # ARGOS-PF: apagada como primer paso de la eliminación de la fusión intermedia y de SER
+      # (Speech Emotion Recognition) — ver ADR-027. En false el backend usa la salida DIRECTA
+      # del modelo visual (/infer/video), que es además lo que corre siempre en sesión
+      # presencial, con o sin esta bandera. La variable y su ruta de código se eliminan por
+      # completo en el mismo cambio; esto solo verifica el comportamiento final antes de borrar
+      # nada.
+      ARGOS_FUSION_INTERMEDIA_ENABLED: ${ARGOS_FUSION_INTERMEDIA_ENABLED:-false}
       EMOCIONES_TIMEOUT_MS: ${EMOCIONES_TIMEOUT_MS:-5000}
       ARGOS_TEMAS_PROVIDER: ${ARGOS_TEMAS_PROVIDER:-LOCAL}
       ARGOS_TEMAS_MIN_CONFIDENCE: ${ARGOS_TEMAS_MIN_CONFIDENCE:-0.60}
@@ -139,18 +133,10 @@ services:
     container_name: argos-transcripcion
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
-      WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-true}
-      # Encoder DEDICADO a /embed. NO reemplaza a WHISPER_MODEL: el encoder adaptado degrada la
-      # transcripcion en +0,2535 de WER (ADR-025), asi que los dos conviven -uno transcribe, el
-      # otro solo alimenta la fusion emocional-.
-      #
-      # ARGOS-110: se apunta al mismo path que produccion. El build local ya usa target:
-      # production del mismo Dockerfile, y esa etapa depende de constructor-modelo -que genera y
-      # verifica por sha256 el checkpoint- pase lo que pase con esta variable: dejarla vacia no
-      # ahorraba tiempo de build, solo dejaba el resultado sin usar. Sin esto, /embed local caia
-      # en el fallback "usa el modelo de transcripcion", que ES un encoder distinto del que la
-      # guarda de compatibilidad (encoder_compatible en el servicio de emociones) espera para
-      # fusion intermedia: cualquier embedding de audio real se hubiera rechazado con 400.
+      # ARGOS-PF: apagada junto con ARGOS_FUSION_INTERMEDIA_ENABLED (ver comentario en el
+      # servicio backend) — el endpoint /embed y el encoder SER adaptado se eliminan en el mismo
+      # cambio. Ver ADR-027.
+      WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-false}
       WHISPER_EMBEDDING_MODEL: ${WHISPER_EMBEDDING_MODEL:-/modelos/whisper-argos-ser-int8}
       # ARGOS-110. Bandera propia del servicio, distinta de la del backend: sin esto el backend
       # pide agrupar y el servicio devuelve null en silencio. Deriva de la misma variable.
@@ -192,7 +178,9 @@ services:
       # Calibracion de la confianza visual: se mueven JUNTAS. Ver .env.example.
       EMOCIONES_VIDEO_TEMPERATURE: ${EMOCIONES_VIDEO_TEMPERATURE:-2.40}
       EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.291}
-      EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-true}
+      # ARGOS-PF: apagada junto con ARGOS_FUSION_INTERMEDIA_ENABLED del backend y
+      # WHISPER_EMBEDDING_ENABLED de transcripción — ver ADR-027.
+      EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-false}
       EMOCIONES_FUSION_UMBRAL: ${EMOCIONES_FUSION_UMBRAL:-0.45}
       # Correccion por prior (angel/correccion_por_prior_fusion.py): 1.20 medido sobre RAVDESS con
       # split fit/reporte disjunto en hablante. UAR 0,7795 -> 0,7917, recall 'neutral'
