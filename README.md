@@ -133,8 +133,8 @@ docker compose down -v
 Por eso `Argos-Local` debe mantenerse como carpeta hermana de los tres repos de codigo.
 
 **El contexto de los servicios de IA es la raiz de `Argos-Entrenamiento`, no la carpeta del
-servicio.** La etapa que construye el encoder emocional necesita `angel/` —el checkpoint y los
-scripts de export y verificacion—, que vive fuera de `servicio-transcripcion/`.
+servicio.** `servicio-transcripcion/Dockerfile` reusa `angel/fbank_kaldi.py` para la diarizacion
+en vez de duplicarlo, y ese archivo vive fuera de `servicio-transcripcion/`.
 
 ## Los dos compose
 
@@ -145,23 +145,11 @@ scripts de export y verificacion—, que vive fuera de `servicio-transcripcion/`
 
 Un cambio de configuracion que solo toque `docker-compose.yml` **no llega a produccion**.
 
-### La fusion emocional viene apagada en local, encendida en produccion
+### FER es la unica fuente emocional
 
-| Variable | Local | Produccion |
-|---|---|---|
-| `WHISPER_EMBEDDING_MODEL` | vacio | `/modelos/whisper-argos-ser-int8` |
-| `EMOCIONES_FUSION_ARTEFACTO` | v3 | v3 |
-| `ARGOS_FUSION_INTERMEDIA_ENABLED` | `false` | `true` |
-
-Para encenderla en local alcanza con copiar `.env.example`, que ya trae las tres con el valor de
-produccion, y levantar de nuevo.
-
-**Las tres van juntas.** La fusion v3 declara con que encoder fue entrenada y **rechaza con 400**
-los embeddings de otro, asi que encender una sola falla de forma ruidosa —que es lo que se busca—
-en vez de devolver emociones plausibles calculadas sobre un espacio latente equivocado.
-
-Para revertir: `ARGOS_FUSION_INTERMEDIA_ENABLED=false` y reiniciar el backend. Segundos, sin
-redesplegar imagenes.
+La fusion emocional intermedia y el encoder de audio adaptado (ARGOS-169, ADR-024/ADR-025) se
+eliminaron: `servicio-emociones` solo expone `/infer/video`, identico en presencial y virtual.
+Ver [ADR-027](../Argos-Documentacion/ADRs/ARGOS_ADR_027_Eliminacion_de_la_Fusion_Tardia.md).
 
 ## Notas de configuracion
 

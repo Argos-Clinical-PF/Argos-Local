@@ -78,32 +78,13 @@ Los defaults de producción se resuelven en tres niveles, de menor a mayor prior
 2. un `.env` en el disco de la instancia, si existe;
 3. las variables que inyecta el workflow.
 
-## Encoder de audio adaptado (ARGOS-169 / ADR-025)
+## FER es la única fuente emocional (ADR-027)
 
-Desde el 2026-08-06 `transcripcion` sirve **dos** modelos: `small` de fábrica para
-`/transcribir` y `whisper-small-argos-ser-int8` **solo** para `/embed`.
-
-El binario no está en Git —pesa 237 MB y GitHub corta en 100 MB—, así que **la imagen lo
-construye** desde un checkpoint de 8 MB y **verifica** que reproduce el modelo evaluado antes de
-seguir. Si no reproduce, la build falla y no se publica nada. La imagen pasa de 353 a 554 MB.
-
-Tres variables encienden la ruta y **van juntas**:
-
-| Servicio | Variable | Valor en producción |
-|---|---|---|
-| transcripcion | `WHISPER_EMBEDDING_MODEL` | `/modelos/whisper-argos-ser-int8` |
-| emociones | `EMOCIONES_FUSION_ARTEFACTO` | `…/fusion-intermedia-v3.npz` |
-| backend | `ARGOS_FUSION_INTERMEDIA_ENABLED` | `true` |
-
-**Orden de despliegue:** transcripción primero —expone `/embed` con el encoder nuevo y, como
-nadie lo consume todavía, no cambia nada—, después emociones con la v3, y por último el backend.
-
-**Reversión:** `ARGOS_FUSION_INTERMEDIA_ENABLED=false` y reiniciar el backend. Segundos, sin
-redesplegar imágenes.
-
-La fusión v3 declara con qué encoder fue entrenada y **rechaza con 400** los embeddings de otro,
-así que desplegar una pieza sin las otras falla de forma ruidosa en vez de producir emociones
-plausibles sobre un espacio latente equivocado.
+El encoder de audio adaptado (ADR-025) y la fusión intermedia (ADR-024) se eliminaron:
+`transcripcion` vuelve a servir un solo modelo Whisper (`/transcribir`), y `emociones` solo
+expone `/infer/video` — idéntico en sesiones presenciales y virtuales. Ver
+[ADR-027](../Argos-Documentacion/ADRs/ARGOS_ADR_027_Eliminacion_de_la_Fusion_Tardia.md), que
+deroga ambos ADRs.
 
 ## Agrupamiento de voces (ARGOS-110 / ADR-026)
 
