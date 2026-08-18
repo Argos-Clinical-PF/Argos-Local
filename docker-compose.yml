@@ -124,16 +124,28 @@ services:
     depends_on:
       backend:
         condition: service_started
+    # Sin esto el puerto 5173 queda publicado desde que arranca el contenedor, pero Vite
+    # todavia no escucha: las peticiones que entran en esa ventana se cortan con
+    # ERR_CONNECTION_RESET. Como el grafo de modulos ES es todo-o-nada, que falle UN modulo
+    # deja el <div id="root"> vacio -pantalla en blanco- aunque el resto haya cargado bien.
+    # Con el healthcheck, `docker compose up --wait` y `docker ps` recien marcan healthy
+    # cuando el dev server responde de verdad.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5173/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
     restart: unless-stopped
 
   transcripcion:
     build:
       # Contexto RAIZ y no servicio-transcripcion/ (ARGOS-169): la etapa constructora del
-      # Dockerfile necesita el checkpoint de angel/exported_models/ para generar el encoder
+      # Dockerfile necesita el checkpoint de models/exported/ para generar el encoder
       # emocional durante la build. El modelo pesa 237 MB y GitHub rechaza archivos de mas de
       # 100 MB, asi que se versiona la receta -8 MB- y el binario se construye.
       context: ../Argos-Entrenamiento
-      dockerfile: servicio-transcripcion/Dockerfile
+      dockerfile: services/servicio-transcripcion/Dockerfile
       target: production
     container_name: argos-transcripcion
     environment:
@@ -184,7 +196,7 @@ services:
   emociones:
     build:
       context: ../Argos-Entrenamiento
-      dockerfile: servicio-emociones/Dockerfile
+      dockerfile: services/servicio-emociones/Dockerfile
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-va-mtl}
