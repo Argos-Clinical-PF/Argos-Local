@@ -199,3 +199,56 @@ docker exec -t argos-postgres pg_dump -U argos_app argos_clinical > backup.sql
 ```
 
 En resumen: mientras no se use `docker compose down -v` ni se elimine manualmente el volumen, la base de datos debería persistir correctamente.
+
+## El backend no arranca: "Migration checksum mismatch"
+
+**Sintoma.** El login falla con *"No se pudo iniciar sesion. Intenta nuevamente"*, y
+`http://localhost:8080/api/health` no responde (`curl` devuelve `000`). En los logs:
+
+```
+docker compose logs backend | grep -i checksum
+# Migration checksum mismatch for migration version NN
+# Validate failed: Migrations have failed validation
+```
+
+El backend no esta caido por un bug de la aplicacion: Flyway aborta el arranque antes de levantar
+el servidor, Maven termina el proceso y el contenedor entra en bucle de reinicio. Sin backend, el
+frontend cae al mensaje generico de error.
+
+**Causa.** Alguien corrigio una migracion que tu base local **ya habia aplicado**. Flyway guarda el
+checksum de cada migracion en `flyway_schema_history`; si el archivo cambia despues de aplicarse,
+el checksum deja de coincidir y la validacion falla.
+
+Pasa tipicamente cuando una migracion es valida en PostgreSQL pero no en H2 —la base de los tests—
+y hay que reescribirla: en CI nunca se habia aplicado, pero en tu maquina si.
+
+**Solucion.** `flyway repair` realinea los checksums registrados con los archivos actuales.
+**No re-ejecuta migraciones ni toca datos:** solo corrige la metadata. Desde `Argos-Local/`:
+
+```bash
+docker run --rm --network argos-local_default \
+  -v "$(cd ../Argos-Backend/src/main/resources/db/migration && pwd):/flyway/sql:ro" \
+  flyway/flyway:11 \
+  -url=jdbc:postgresql://argos-postgres:5432/argos_clinical \
+  -user=argos_app -password="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)" \
+  -cleanDisabled=true repair
+
+docker compose restart backend
+```
+
+El backend recompila al reiniciar, asi que tarda un rato. Esta listo cuando:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/health   # 200
+```
+
+**Cuando NO usar esto.** `repair` asume que el esquema que quedo en la base es correcto y que solo
+cambio la forma de escribir la migracion. Si la correccion cambio lo que la migracion *hace* —otra
+columna, otro tipo, otro backfill—, reparar deja la base con el esquema viejo y el checksum nuevo:
+el problema queda escondido. En ese caso hay que recrear la base:
+
+```bash
+docker compose down -v && docker compose up -d --build
+```
+
+Eso borra los datos locales; ver «Persistencia de la base de datos» mas arriba.
