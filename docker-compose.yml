@@ -116,10 +116,10 @@ services:
 
   transcripcion:
     build:
-      # Contexto RAIZ y no servicio-transcripcion/: el Dockerfile reusa angel/fbank_kaldi.py
+      # Contexto RAIZ y no services/servicio-transcripcion/: el Dockerfile reusa models/fbank_kaldi.py
       # para la diarizacion en vez de duplicarlo.
       context: ../Argos-Entrenamiento
-      dockerfile: servicio-transcripcion/Dockerfile
+      dockerfile: services/servicio-transcripcion/Dockerfile
       target: production
     container_name: argos-transcripcion
     environment:
@@ -156,7 +156,7 @@ services:
   emociones:
     build:
       context: ../Argos-Entrenamiento
-      dockerfile: servicio-emociones/Dockerfile
+      dockerfile: services/servicio-emociones/Dockerfile
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-va-mtl}

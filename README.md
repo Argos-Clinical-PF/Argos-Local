@@ -127,14 +127,14 @@ docker compose down -v
 |---|---|---|
 | Backend | `../Argos-Backend` | por defecto, `target: development` |
 | Frontend | `../Argos-Frontend` | por defecto, `target: development` |
-| Transcripcion | `../Argos-Entrenamiento` | `servicio-transcripcion/Dockerfile`, `target: production` |
-| Emociones | `../Argos-Entrenamiento` | `servicio-emociones/Dockerfile` |
+| Transcripcion | `../Argos-Entrenamiento` | `services/servicio-transcripcion/Dockerfile`, `target: production` |
+| Emociones | `../Argos-Entrenamiento` | `services/servicio-emociones/Dockerfile` |
 
 Por eso `Argos-Local` debe mantenerse como carpeta hermana de los tres repos de codigo.
 
 **El contexto de los servicios de IA es la raiz de `Argos-Entrenamiento`, no la carpeta del
-servicio.** `servicio-transcripcion/Dockerfile` reusa `angel/fbank_kaldi.py` para la diarizacion
-en vez de duplicarlo, y ese archivo vive fuera de `servicio-transcripcion/`.
+servicio.** `services/servicio-transcripcion/Dockerfile` reusa `models/fbank_kaldi.py` para la
+diarizacion en vez de duplicarlo, y ese archivo vive fuera de `services/servicio-transcripcion/`.
 
 ## Los dos compose
 
