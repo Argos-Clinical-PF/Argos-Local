@@ -36,18 +36,6 @@ services:
       TRANSCRIPCION_REALTIME_RETRIES: ${TRANSCRIPCION_REALTIME_RETRIES:-3}
       TRANSCRIPCION_REALTIME_BACKOFF_MS: ${TRANSCRIPCION_REALTIME_BACKOFF_MS:-1000}
       EMOCIONES_SERVICE_URL: ${EMOCIONES_SERVICE_URL:-http://emociones:9010}
-      EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
-      # ARGOS-169 / ADR-025: enciende la ruta /embed + /infer/fusion en el backend. Los TRES
-      # cambios van juntos -este, WHISPER_EMBEDDING_MODEL y la fusion v3- o la guarda de
-      # encoder rechaza los embeddings. Revertir: poner false y reiniciar el backend.
-      #
-      # ARGOS-110: fusión intermedia pasa a ser el default también en local, igual que en
-      # producción -este repo quedó atrasado, era el único de los tres que seguía en false-.
-      # La fusión tardía (Java, FusionadorEmocional) queda como reversión funcional, no como
-      # default: si aparecía en una sesión local era por esto, no por decisión del profesional.
-      # WHISPER_EMBEDDING_MODEL (más abajo) también quedó atrasado con el mismo patrón — corregido
-      # junto con esto.
-      ARGOS_FUSION_INTERMEDIA_ENABLED: ${ARGOS_FUSION_INTERMEDIA_ENABLED:-true}
       EMOCIONES_TIMEOUT_MS: ${EMOCIONES_TIMEOUT_MS:-5000}
       ARGOS_TEMAS_PROVIDER: ${ARGOS_TEMAS_PROVIDER:-LOCAL}
       ARGOS_TEMAS_MIN_CONFIDENCE: ${ARGOS_TEMAS_MIN_CONFIDENCE:-0.60}
@@ -128,33 +116,17 @@ services:
 
   transcripcion:
     build:
-      # Contexto RAIZ y no servicio-transcripcion/ (ARGOS-169): la etapa constructora del
-      # Dockerfile necesita el checkpoint de angel/exported_models/ para generar el encoder
-      # emocional durante la build. El modelo pesa 237 MB y GitHub rechaza archivos de mas de
-      # 100 MB, asi que se versiona la receta -8 MB- y el binario se construye.
+      # Contexto RAIZ y no services/servicio-transcripcion/: el Dockerfile reusa models/fbank_kaldi.py
+      # para la diarizacion en vez de duplicarlo.
       context: ../Argos-Entrenamiento
-      dockerfile: servicio-transcripcion/Dockerfile
+      dockerfile: services/servicio-transcripcion/Dockerfile
       target: production
     container_name: argos-transcripcion
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
-      WHISPER_EMBEDDING_ENABLED: ${WHISPER_EMBEDDING_ENABLED:-true}
-      # Encoder DEDICADO a /embed. NO reemplaza a WHISPER_MODEL: el encoder adaptado degrada la
-      # transcripcion en +0,2535 de WER (ADR-025), asi que los dos conviven -uno transcribe, el
-      # otro solo alimenta la fusion emocional-.
-      #
-      # ARGOS-110: se apunta al mismo path que produccion. El build local ya usa target:
-      # production del mismo Dockerfile, y esa etapa depende de constructor-modelo -que genera y
-      # verifica por sha256 el checkpoint- pase lo que pase con esta variable: dejarla vacia no
-      # ahorraba tiempo de build, solo dejaba el resultado sin usar. Sin esto, /embed local caia
-      # en el fallback "usa el modelo de transcripcion", que ES un encoder distinto del que la
-      # guarda de compatibilidad (encoder_compatible en el servicio de emociones) espera para
-      # fusion intermedia: cualquier embedding de audio real se hubiera rechazado con 400.
-      WHISPER_EMBEDDING_MODEL: ${WHISPER_EMBEDDING_MODEL:-/modelos/whisper-argos-ser-int8}
       # ARGOS-110. Bandera propia del servicio, distinta de la del backend: sin esto el backend
       # pide agrupar y el servicio devuelve null en silencio. Deriva de la misma variable.
       DIARIZACION_ENABLED: ${ARGOS_DIARIZACION_ENABLED:-false}
-      WHISPER_ENCODER_ID: ${WHISPER_ENCODER_ID:-ctranslate2-whisper-small-int8}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_IDIOMA: ${WHISPER_IDIOMA:-es}
@@ -184,21 +156,13 @@ services:
   emociones:
     build:
       context: ../Argos-Entrenamiento
-      dockerfile: servicio-emociones/Dockerfile
+      dockerfile: services/servicio-emociones/Dockerfile
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-va-mtl}
       # Calibracion de la confianza visual: se mueven JUNTAS. Ver .env.example.
       EMOCIONES_VIDEO_TEMPERATURE: ${EMOCIONES_VIDEO_TEMPERATURE:-2.40}
       EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.291}
-      EMOCIONES_FUSION_INTERMEDIA_ENABLED: ${EMOCIONES_FUSION_INTERMEDIA_ENABLED:-true}
-      EMOCIONES_FUSION_UMBRAL: ${EMOCIONES_FUSION_UMBRAL:-0.45}
-      # Correccion por prior (angel/correccion_por_prior_fusion.py): 1.20 medido sobre RAVDESS con
-      # split fit/reporte disjunto en hablante. UAR 0,7795 -> 0,7917, recall 'neutral'
-      # 0,6250 -> 0,8125, 'sad' sin retroceder (0,6250 -> 0,6354). Revertir: poner en 0.
-      EMOCIONES_FUSION_TAU: ${EMOCIONES_FUSION_TAU:-1.20}
-      EMOCIONES_AUDIO_MODEL_ID: ${EMOCIONES_AUDIO_MODEL_ID:-argos-audio-cnn-ravdess}
-      EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
       EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-true}
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-true}
