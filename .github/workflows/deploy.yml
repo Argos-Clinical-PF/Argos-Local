@@ -298,13 +298,23 @@ jobs:
             --document-name AWS-RunShellScript --parameters "$PARAMETERS" \
             --query 'Command.CommandId' --output text)
           echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
-          for _ in $(seq 1 180); do
+          echo "Comando SSM: $COMMAND_ID"
+          for intento in $(seq 1 180); do
             ESTADO=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
               --instance-id "${{ steps.aws.outputs.instance_id }}" --query Status --output text 2>/dev/null || true)
             [ "$ESTADO" = "Success" ] && exit 0
-            case "$ESTADO" in Failed|Cancelled|TimedOut) exit 1 ;; esac
+            case "$ESTADO" in
+              Failed|Cancelled|TimedOut)
+                echo "El comando SSM termino en estado $ESTADO tras $((intento * 10))s."
+                exit 1
+                ;;
+            esac
+            if (( intento % 6 == 0 )); then
+              echo "Deploy en curso ($intento/180, estado=${ESTADO:-Pending})..."
+            fi
             sleep 10
           done
+          echo "El comando SSM no termino en 30 min (ultimo estado: ${ESTADO:-desconocido})."
           exit 1
 
       - name: Mostrar diagnóstico ante fallo
