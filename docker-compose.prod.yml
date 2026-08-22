@@ -82,7 +82,7 @@ services:
       # v3: entrenada sobre el encoder adaptado. Declara `encoder_audio` y RECHAZA con 400 los
       # embeddings de otro encoder, asi que va atada a WHISPER_EMBEDDING_MODEL de arriba.
       # UAR 0,7839 -> 0,8099 y `sad` 0,521 -> 0,635, que era la advertencia clinica registrada.
-      EMOCIONES_FUSION_ARTEFACTO: ${EMOCIONES_FUSION_ARTEFACTO:-/app/angel/artefactos/fusion-intermedia-v3.npz}
+      EMOCIONES_FUSION_ARTEFACTO: ${EMOCIONES_FUSION_ARTEFACTO:-/app/models/artefactos/fusion-intermedia-v3.npz}
       EMOCIONES_FUSION_UMBRAL: ${EMOCIONES_FUSION_UMBRAL:-0.45}
       EMOCIONES_AUDIO_MODEL_ID: argos-audio-cnn-ravdess
       EMOCIONES_AUDIO_ENABLED: ${EMOCIONES_AUDIO_ENABLED:-false}
