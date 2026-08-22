@@ -147,6 +147,15 @@ fi
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
+# Guard de espacio: el disco de 30 GiB ya se lleno una vez a mitad de un pull (incidente
+# 2026-08-01, "no space left on device" extrayendo una capa de opencv). Mejor abortar
+# temprano con un mensaje claro que dejar el compose a medio extraer.
+DISPONIBLE_KB=$(df --output=avail / | tail -1)
+if [ "$DISPONIBLE_KB" -lt 5242880 ]; then
+  echo "Espacio en disco insuficiente para el deploy ($((DISPONIBLE_KB / 1024)) MiB libres, se requieren al menos 5120 MiB). Abortando antes del pull."
+  exit 1
+fi
+
 docker compose "${COMPOSE_FILES[@]}" --env-file .env pull
 docker logout "$ECR_REGISTRY" >/dev/null
 # En una unica EC2 el reemplazo concurrente puede dejar referencias a contenedores

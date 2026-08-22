@@ -89,6 +89,8 @@ services:
       EMOCIONES_MOCK: "false"
       EMOCIONES_STRICT_LOAD: "true"
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-true}
+    volumes:
+      - argos-emotiefflib-cache:/root/.emotiefflib
     healthcheck:
       test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://localhost:9010/health', timeout=5))['listo']"]
       interval: 15s
@@ -216,6 +218,7 @@ services:
 volumes:
   argos-postgres-data:
   argos-whisper-cache:
+  argos-emotiefflib-cache:
   argos-caddy-data:
   argos-caddy-config:
   argos-profile-uploads:

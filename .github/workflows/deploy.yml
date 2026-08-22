@@ -246,13 +246,15 @@ jobs:
           # cada release deja atras la version previa de los cuatro servicios y nadie
           # las borraba. El 2026-08-01 el despliegue de entrenamiento fallo con
           # "no space left on device" al extraer una capa de opencv.
-          # Se purga antes del pull. El filtro until=24h protege las imagenes de
-          # despliegues del mismo dia; las de contenedores en ejecucion nunca se tocan.
+          # Se purga antes del pull, sin filtro de antiguedad: el rollback vuelve a
+          # hacer pull por tag desde ECR (no depende de una imagen cacheada localmente),
+          # asi que no hay downside en purgar tambien las del mismo dia. Las de
+          # contenedores en ejecucion nunca se tocan.
           PARAMETERS=$(jq -cn '{commands:[
             "echo === disco antes ===",
             "df -h /",
             "docker container prune -f || true",
-            "docker image prune -af --filter until=24h || true",
+            "docker image prune -af || true",
             "docker builder prune -af || true",
             "echo === disco despues ===",
             "df -h /"
