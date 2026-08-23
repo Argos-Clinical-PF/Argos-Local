@@ -19,7 +19,7 @@ jobs:
       EMOCIONES_TAG: sha-validation
       RECORDINGS_BUCKET: argos-validation
       PUBLIC_BASE_URL: https://argos.example
-      PUBLIC_HOST: argos.example
+      ORIGIN_HOST: origin.argos.example
     steps:
       - uses: actions/checkout@v4
 
@@ -29,18 +29,15 @@ jobs:
           docker compose config --quiet
           docker compose -f docker-compose.prod.yml config --quiet
 
-      - name: Validar Caddyfile y TLS sin SNI
+      - name: Validar Caddyfile del origen propio
         run: |
           docker run --rm \
-            -e PUBLIC_IP=192.0.2.10 \
-            -e PUBLIC_HOST=example.test \
+            -e ORIGIN_HOST=origin.argos.example \
             -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2.10-alpine \
             caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --pretty \
             > caddy.json
-          jq -e \
-            '[.. | objects | .default_sni? // empty] | index("192.0.2.10") != null' \
-            caddy.json >/dev/null
+          jq -e '.. | objects | select(.host? == ["origin.argos.example"])' caddy.json >/dev/null
 
       - name: Validar scripts
         uses: ludeeus/action-shellcheck@2.0.0

@@ -42,7 +42,6 @@ on:
       - docker-compose.gpu.yml
       - docker-compose.prod.yml
       - scripts/deploy-mvp.sh
-      - scripts/refresh-ip-certificate.sh
       - .github/workflows/deploy.yml
 
 permissions:
@@ -196,16 +195,11 @@ jobs:
             aws s3 cp "$SOURCE/docker-compose.gpu.yml" "$PREFIX/docker-compose.gpu.yml" || true
             aws s3 cp "$SOURCE/Caddyfile" "$PREFIX/Caddyfile"
             aws s3 cp "$SOURCE/deploy-mvp.sh" "$PREFIX/deploy-mvp.sh"
-            if ! aws s3 cp "$SOURCE/refresh-ip-certificate.sh" "$PREFIX/refresh-ip-certificate.sh"; then
-              echo "La release historica no contiene el renovador IP; usando la version compatible actual."
-              aws s3 cp scripts/refresh-ip-certificate.sh "$PREFIX/refresh-ip-certificate.sh"
-            fi
           else
             aws s3 cp docker-compose.prod.yml "$PREFIX/docker-compose.prod.yml"
             aws s3 cp docker-compose.gpu.yml "$PREFIX/docker-compose.gpu.yml"
             aws s3 cp Caddyfile "$PREFIX/Caddyfile"
             aws s3 cp scripts/deploy-mvp.sh "$PREFIX/deploy-mvp.sh"
-            aws s3 cp scripts/refresh-ip-certificate.sh "$PREFIX/refresh-ip-certificate.sh"
           fi
           aws s3 cp candidate.json "$PREFIX/manifest.json"
 
@@ -291,9 +285,7 @@ jobs:
               "aws s3 cp \($prefix)/docker-compose.gpu.yml /home/ec2-user/argos/docker-compose.gpu.yml || true",
               "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/Caddyfile",
               "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh",
-              "aws s3 cp \($prefix)/refresh-ip-certificate.sh /home/ec2-user/argos/refresh-ip-certificate.sh",
               "chmod 700 /home/ec2-user/argos/deploy-mvp.sh",
-              "chmod 700 /home/ec2-user/argos/refresh-ip-certificate.sh",
               "AWS_REGION=\($region) BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) EMOCIONES_TAG=\($emociones) /home/ec2-user/argos/deploy-mvp.sh"
             ]}')
           COMMAND_ID=$(aws ssm send-command --instance-ids "${{ steps.aws.outputs.instance_id }}" \

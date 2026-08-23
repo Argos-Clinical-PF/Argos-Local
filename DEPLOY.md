@@ -4,9 +4,10 @@
 
 ```text
 GitHub Actions (OIDC) -> ECR -> SSM -> EC2 c7i.2xlarge
-Usuario -> HTTPS argosclinical.online -> CloudFront (+ AWS WAF) -> origin.argosclinical.online
-        -> EIP -> Caddy -> Nginx frontend -> backend -> PostgreSQL
-                                                 \-> Whisper + emociones
+Usuario -> Route 53 -> CloudFront (ACM + WAF) -> HTTPS origin.argosclinical.online
+                                                    -> EIP -> Caddy -> Nginx frontend
+                                                                          -> backend -> PostgreSQL
+                                                                                     \-> Whisper + emociones
 ```
 
 > **CloudFront está delante de todo desde el 2026-08-06.** `argosclinical.online` no resuelve al
@@ -15,11 +16,11 @@ Usuario -> HTTPS argosclinical.online -> CloudFront (+ AWS WAF) -> origin.argosc
 > [«AWS WAF y las rutas de subida»](#aws-waf-y-las-rutas-de-subida) más abajo y
 > [ADR-023](../Argos-Documentacion/ADRs/ARGOS_ADR_023_Arquitectura_AWS_y_Dominio.md).
 
-- No requiere ALB, SSH ni credenciales AWS guardadas en GitHub.
-- `sslip.io` resuelve gratuitamente un hostname basado en la EIP, y sigue sirviendo como acceso
-  directo al origen, sin pasar por CloudFront — útil justamente para descartar al borde cuando algo
-  falla.
-- Caddy obtiene y renueva automáticamente un certificado público y exige TLS 1.3.
+- El acceso público canónico es `https://argosclinical.online`; `www` redirige al dominio raíz con
+  un 301 emitido por una CloudFront Function, así queda un solo origen para CORS y para la sesión.
+- CloudFront termina el TLS público con ACM y reenvía sin caché al origen propio por HTTPS.
+- `origin.argosclinical.online` apunta a la EIP y Caddy obtiene y renueva su certificado público.
+- No se usa `sslip.io`, ALB, SSH ni credenciales AWS guardadas en GitHub.
 - PostgreSQL, backend y transcripción no publican puertos al exterior.
 - La instancia compute-optimized aporta 8 vCPU sostenidas para la inferencia CPU
   y permanece detenida fuera de demos.
@@ -44,8 +45,17 @@ El nombre del perfil **no se hardcodea**: cada integrante configura el suyo y lo
 `AWS_PROFILE`. Si falla con `Unable to locate credentials`, listar los disponibles con
 `aws configure list-profiles`.
 
-Terraform administra EC2/EIP, ECR, S3 operativo, SSM, IAM y el rol
-OIDC `argos-github-actions`.
+Terraform administra EC2/EIP, ECR, S3 operativo, IAM, los registros Route 53,
+CloudFront, WAF y el rol OIDC `argos-github-actions`. La hosted zone y el
+certificado ACM existentes se descubren como fuentes de datos para evitar recrearlos.
+
+La ruta pública tiene dos nombres con responsabilidades distintas:
+
+- `argosclinical.online`: URL que ven usuarios y genera el backend.
+- `origin.argosclinical.online`: origen técnico de CloudFront; nunca debe apuntar a CloudFront.
+
+CloudFront debe conservar `HTTPS only` y `Managed-AllViewerExceptHostHeader` hacia el origen.
+Usar HTTP produce un bucle de redirección con Caddy; usar el hostname público de EC2 rompe TLS.
 
 ## Parámetros SSM
 
@@ -53,6 +63,7 @@ Los secretos se almacenan cifrados en Parameter Store bajo `/argos/mvp/`:
 
 ```text
 public-base-url
+origin-base-url
 postgres-password
 jwt-secret
 mail-username
@@ -216,7 +227,7 @@ Para una demo:
 3. Esperar que el workflow finalice. El arranque de EC2, Docker y los modelos
    puede tardar entre cuatro y ocho minutos; `running` no significa todavía que
    la aplicación esté saludable.
-4. Abrir `https://32-193-249-170.sslip.io` solamente después del smoke test.
+4. Abrir `https://argosclinical.online` solamente después del smoke test.
 5. Al terminar, ejecutar `Operate MVP` con acción `stop`.
 
    ```bash
@@ -232,10 +243,10 @@ tags deseados y si la EC2 debe detenerse después de validar.
 
 ## Costos
 
-Con la EC2 detenida se mantienen únicamente EBS, EIP, ECR, S3 de bajo uso y el dominio. No hay
-costo fijo de ALB. CloudFront no tiene cargo fijo pero sí por request y transferencia, ambos
-despreciables al volumen actual. Antes y después de cada demo, confirmar que la instancia
-`argos-app` esté en estado `stopped`.
+Con la EC2 detenida se mantienen EBS, EIP, ECR y S3 de bajo uso, además del dominio, Route 53,
+CloudFront y WAF. No hay costo fijo de ALB. CloudFront no tiene cargo fijo pero sí por request y
+transferencia, ambos despreciables al volumen actual. Antes y después de cada demo, confirmar que
+la instancia `argos-app` esté en estado `stopped`.
 
 ## Recuperación
 

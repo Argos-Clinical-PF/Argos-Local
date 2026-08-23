@@ -1,23 +1,9 @@
-{
-	# Los clientes que acceden mediante una IP literal pueden omitir SNI.
-	# En ese caso Caddy debe seleccionar explicitamente el certificado IP.
-	default_sni {$PUBLIC_IP}
-}
-
 (app) {
 	encode zstd gzip
 	reverse_proxy frontend:5173
 }
 
-https://{$PUBLIC_IP} {
-	tls /etc/letsencrypt/live/{$PUBLIC_IP}/fullchain.pem /etc/letsencrypt/live/{$PUBLIC_IP}/privkey.pem {
-		protocols tls1.2 tls1.3
-	}
-
-	import app
-}
-
-{$PUBLIC_HOST} {
+{$ORIGIN_HOST} {
 	tls {
 		protocols tls1.2 tls1.3
 	}

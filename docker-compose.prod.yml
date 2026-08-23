@@ -179,14 +179,12 @@ services:
     image: caddy:2.10-alpine
     container_name: argos-gateway
     environment:
-      PUBLIC_HOST: ${PUBLIC_HOST}
-      PUBLIC_IP: ${PUBLIC_IP}
+      ORIGIN_HOST: ${ORIGIN_HOST}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./certbot:/etc/letsencrypt:ro
       - argos-caddy-data:/data
       - argos-caddy-config:/config
     depends_on:
