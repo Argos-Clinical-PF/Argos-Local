@@ -13,3 +13,6 @@ terraform/*.tfplan
 terraform/*.pem
 terraform/*.key
 terraform/argos-deploy.pub
+
+# Ajustes locales de cada desarrollador: nunca se versionan.
+docker-compose.override.yml
