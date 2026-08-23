@@ -4,12 +4,21 @@
 
 ```text
 GitHub Actions (OIDC) -> ECR -> SSM -> EC2 c7i.2xlarge
-Usuario -> HTTPS sslip.io -> EIP -> Caddy -> Nginx frontend -> backend -> PostgreSQL
-                                                       \-> Whisper + emociones
+Usuario -> HTTPS argosclinical.online -> CloudFront (+ AWS WAF) -> origin.argosclinical.online
+        -> EIP -> Caddy -> Nginx frontend -> backend -> PostgreSQL
+                                                 \-> Whisper + emociones
 ```
 
-- No requiere dominio comprado, ALB, SSH ni credenciales AWS guardadas en GitHub.
-- `sslip.io` resuelve gratuitamente un hostname basado en la EIP.
+> **CloudFront está delante de todo desde el 2026-08-06.** `argosclinical.online` no resuelve al
+> EC2: resuelve a CloudFront, que reenvía al origen. Un 4xx que no aparezca en los logs del backend
+> probablemente lo generó CloudFront o su WAF. Ver
+> [«AWS WAF y las rutas de subida»](#aws-waf-y-las-rutas-de-subida) más abajo y
+> [ADR-023](../Argos-Documentacion/ADRs/ARGOS_ADR_023_Arquitectura_AWS_y_Dominio.md).
+
+- No requiere ALB, SSH ni credenciales AWS guardadas en GitHub.
+- `sslip.io` resuelve gratuitamente un hostname basado en la EIP, y sigue sirviendo como acceso
+  directo al origen, sin pasar por CloudFront — útil justamente para descartar al borde cuando algo
+  falla.
 - Caddy obtiene y renueva automáticamente un certificado público y exige TLS 1.3.
 - PostgreSQL, backend y transcripción no publican puertos al exterior.
 - La instancia compute-optimized aporta 8 vCPU sostenidas para la inferencia CPU
@@ -86,6 +95,78 @@ expone `/infer/video` — idéntico en sesiones presenciales y virtuales. Ver
 [ADR-027](../Argos-Documentacion/ADRs/ARGOS_ADR_027_Eliminacion_de_la_Fusion_Tardia.md), que
 deroga ambos ADRs.
 
+## AWS WAF y las rutas de subida
+
+**Síntoma a reconocer:** la app funciona, pero **solo** fallan con `403` el envío de audio, el envío
+de frames de video y la subida de foto de perfil. En la sala se ve "análisis facial: modelo no
+disponible" y la transcripción no avanza. **En los logs del backend no hay nada**, porque la request
+nunca llegó al EC2.
+
+Si eso pasa, el culpable es el WAF de CloudFront, no los modelos. Diagnóstico en un comando —el
+tamaño del cuerpo es lo único que cambia entre las dos pruebas:
+
+```bash
+head -c 8000  /dev/zero | tr '\0' a > /tmp/chico.bin   # 8 KB  -> debe pasar
+head -c 30000 /dev/zero | tr '\0' a > /tmp/grande.bin  # 30 KB -> si da 403, es el WAF
+for f in chico grande; do
+  printf '%s -> ' "$f"
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+    https://argosclinical.online/api/waf-probe --data-binary @/tmp/$f.bin
+done
+```
+
+Un `403` solo en el grande confirma `SizeRestrictions_BODY` del `AWSManagedRulesCommonRuleSet`, que
+rechaza cualquier cuerpo mayor a 8.192 bytes. La confirmación en métricas:
+
+```bash
+aws cloudwatch get-metric-statistics --namespace AWS/WAFV2 \
+  --metric-name BlockedRequests --region us-east-1 \
+  --dimensions Name=WebACL,Value=CreatedByCloudFront-8f1a9620 \
+               Name=ManagedRuleGroup,Value=AWSManagedRulesCommonRuleSet \
+               Name=ManagedRuleGroupRule,Value=SizeRestrictions_BODY \
+  --start-time "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" \
+  --end-time   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --period 3600 --statistics Sum --output text
+```
+
+### Reparación
+
+El WebACL vigente (`CreatedByCloudFront-8f1a9620`, scope `CLOUDFRONT`, siempre `us-east-1`) tiene
+**todas** las reglas de los tres grupos administrados en `Count`: observa y publica métricas, no
+bloquea. Si alguien lo recrea desde el asistente de CloudFront, vuelven a quedar en `Block` y las
+subidas se rompen otra vez.
+
+Para volver a dejarlas en `Count`, en la consola de AWS WAF: **Web ACLs → scope CloudFront → el
+WebACL → cada grupo administrado → Edit → poner todas las reglas en `Count`**.
+
+Por CLI se puede hacer con `aws wafv2 update-web-acl`, agregando un `RuleActionOverrides` por regla
+dentro de cada `ManagedRuleGroupStatement`. Respaldar primero, porque `update-web-acl` reemplaza la
+definición completa:
+
+```bash
+aws wafv2 get-web-acl --scope CLOUDFRONT --region us-east-1 \
+  --name CreatedByCloudFront-8f1a9620 \
+  --id 61db0a66-3b9d-4224-a1d0-5b13007a1a83 > /tmp/webacl-backup.json
+```
+
+El `LockToken` hay que releerlo justo antes de cada `update-web-acl`: cambia con cada modificación.
+
+### Dos límites que cuestan horas si no se saben de antemano
+
+El WebACL creado por el asistente de CloudFront está atado a un **plan de precios** que restringe
+qué se le puede hacer:
+
+1. **No admite reglas propias.** Escribir una regla `Allow` que exceptúe las rutas de subida —que
+   sería la solución quirúrgica— falla con `WAFFeatureNotIncludedInPricingPlanException`:
+   `String match statement` pide plan PRO y `Regex match statement` pide plan BUSINESS.
+2. **La distribución no puede quedarse sin WebACL, ni cambiarlo.** `UpdateDistribution` responde
+   `You can't remove or replace the web ACL for your distribution. Distributions with a pricing
+   plan subscription must have a web ACL resource.`
+
+La suscripción **no tiene API**: no hay operación para cancelarla ni en CloudFront ni en WAFv2. Solo
+se cancela desde la consola, en **CloudFront → Distributions → `E2E1XIDYBFNZI9` → Security**. Recién
+después se puede quitar el WebACL o reemplazarlo por uno propio.
+
 ## Agrupamiento de voces (ARGOS-110 / ADR-026)
 
 Apagado por defecto. Enciende dos cosas a la vez: el agrupamiento de voces en sesiones
@@ -151,9 +232,10 @@ tags deseados y si la EC2 debe detenerse después de validar.
 
 ## Costos
 
-Con la EC2 detenida se mantienen únicamente EBS, EIP, ECR y S3 de bajo uso. No
-hay costo fijo de ALB, CloudFront ni dominio. Antes y después de cada demo,
-confirmar que la instancia `argos-app` esté en estado `stopped`.
+Con la EC2 detenida se mantienen únicamente EBS, EIP, ECR, S3 de bajo uso y el dominio. No hay
+costo fijo de ALB. CloudFront no tiene cargo fijo pero sí por request y transferencia, ambos
+despreciables al volumen actual. Antes y después de cada demo, confirmar que la instancia
+`argos-app` esté en estado `stopped`.
 
 ## Recuperación
 
