@@ -237,15 +237,27 @@ falla. Es deliberado —fuera de demos la EC2 no debe quedar encendida— pero t
 sorprende: **cada merge a `main` deja el sitio abajo** hasta que alguien lo vuelve a levantar.
 
 Durante un período de demo eso es justamente lo que no se quiere. La variable de repositorio
-`DETENER_EC2_TRAS_DEPLOY` lo controla sin tocar el workflow:
+`DETENER_EC2_TRAS_DEPLOY` lo controla sin tocar el workflow.
+
+> **Va en los repos que LLAMAN al workflow, no en `Argos-Local`.** `deploy.yml` es un workflow
+> reutilizable: el contexto `vars` que ve es el del repositorio que lo invoca. Definirla sólo en
+> `Argos-Local` no tiene ningún efecto sobre un deploy disparado por un merge en el backend o el
+> frontend — el deploy corre igual y apaga la instancia.
 
 ```bash
 # La instancia queda encendida después de cada deploy (período de demo)
-gh variable set DETENER_EC2_TRAS_DEPLOY --body false --repo Argos-Clinical-PF/Argos-Local
+for repo in Argos-Backend Argos-Frontend Argos-Local; do
+  gh variable set DETENER_EC2_TRAS_DEPLOY --body false --repo "Argos-Clinical-PF/$repo"
+done
 
 # Vuelve al comportamiento de ahorro
-gh variable set DETENER_EC2_TRAS_DEPLOY --body true --repo Argos-Clinical-PF/Argos-Local
+for repo in Argos-Backend Argos-Frontend Argos-Local; do
+  gh variable set DETENER_EC2_TRAS_DEPLOY --body true --repo "Argos-Clinical-PF/$repo"
+done
 ```
+
+Con permisos de administrador de la organización alcanza con definirla una vez a nivel org
+(`gh variable set ... --org Argos-Clinical-PF --visibility all`).
 
 Con la variable en `false` **la instancia queda corriendo y genera costo**: hay que detenerla a
 mano al terminar, con `Operate MVP` acción `stop`. Antes y después de cada jornada de demo,
