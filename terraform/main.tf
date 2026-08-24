@@ -131,33 +131,66 @@ resource "aws_eip" "app" {
 }
 
 locals {
-  direct_ip_url = "https://${aws_eip.app.public_ip}"
-  sslip_host    = "${replace(aws_eip.app.public_ip, ".", "-")}.sslip.io"
-  sslip_url     = "https://${local.sslip_host}"
+  public_url    = "https://${var.domain_name}"
+  www_domain    = "www.${var.domain_name}"
+  origin_domain = "origin.${var.domain_name}"
+  origin_url    = "https://${local.origin_domain}"
 }
 
 data "aws_cloudfront_cache_policy" "sin_cache" {
-  count = var.cloudfront_fallback_enabled ? 1 : 0
-  name  = "Managed-CachingDisabled"
+  name = "Managed-CachingDisabled"
 }
 
 data "aws_cloudfront_origin_request_policy" "todos_sin_host" {
-  count = var.cloudfront_fallback_enabled ? 1 : 0
-  name  = "Managed-AllViewerExceptHostHeader"
+  name = "Managed-AllViewerExceptHostHeader"
+}
+
+data "aws_route53_zone" "app" {
+  name         = var.domain_name
+  private_zone = false
+}
+
+data "aws_acm_certificate" "app" {
+  domain      = var.domain_name
+  statuses    = ["ISSUED"]
+  most_recent = true
+}
+
+resource "aws_route53_record" "origin" {
+  zone_id = data.aws_route53_zone.app.zone_id
+  name    = local.origin_domain
+  type    = "A"
+  ttl     = 60
+  records = [aws_eip.app.public_ip]
+}
+
+data "aws_wafv2_web_acl" "app" {
+  name  = "CreatedByCloudFront-8f1a9620"
+  scope = "CLOUDFRONT"
+}
+
+# Canonicaliza el host en el borde: `www` responde 301 al dominio raíz. Ver
+# functions/redirigir-www.js para el motivo (CORS con un solo origen).
+resource "aws_cloudfront_function" "redirigir_www" {
+  name    = "argos-redirigir-www"
+  runtime = "cloudfront-js-2.0"
+  comment = "Redirige www.${var.domain_name} al dominio raiz"
+  publish = true
+  code    = file("${path.module}/functions/redirigir-www.js")
 }
 
 resource "aws_cloudfront_distribution" "app" {
-  count               = var.cloudfront_fallback_enabled ? 1 : 0
   enabled             = true
   is_ipv6_enabled     = true
-  comment             = "ARGOS Clinical - endpoint DNS estable de contingencia"
-  price_class         = "PriceClass_100"
-  wait_for_deployment = false
-  http_version        = "http2and3"
+  aliases             = [var.domain_name, local.www_domain]
+  price_class         = "PriceClass_All"
+  wait_for_deployment = true
+  http_version        = "http2"
+  web_acl_id          = data.aws_wafv2_web_acl.app.arn
 
   origin {
-    domain_name = local.sslip_host
-    origin_id   = "argos-ec2-sslip"
+    domain_name = aws_route53_record.origin.fqdn
+    origin_id   = "argos-ec2-origin"
 
     custom_origin_config {
       http_port              = 80
@@ -169,13 +202,18 @@ resource "aws_cloudfront_distribution" "app" {
   }
 
   default_cache_behavior {
-    target_origin_id         = "argos-ec2-sslip"
+    target_origin_id         = "argos-ec2-origin"
     viewer_protocol_policy   = "redirect-to-https"
     allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods           = ["GET", "HEAD", "OPTIONS"]
+    cached_methods           = ["GET", "HEAD"]
     compress                 = true
-    cache_policy_id          = data.aws_cloudfront_cache_policy.sin_cache[0].id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.todos_sin_host[0].id
+    cache_policy_id          = data.aws_cloudfront_cache_policy.sin_cache.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.todos_sin_host.id
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.redirigir_www.arn
+    }
   }
 
   restrictions {
@@ -185,12 +223,37 @@ resource "aws_cloudfront_distribution" "app" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
-    minimum_protocol_version       = "TLSv1.2_2021"
+    acm_certificate_arn      = data.aws_acm_certificate.app.arn
+    minimum_protocol_version = "TLSv1.2_2021"
+    ssl_support_method       = "sni-only"
   }
 
   tags = {
-    Name = "argos-app-fallback"
+    Name = "argos-web"
+  }
+}
+
+resource "aws_route53_record" "apex" {
+  zone_id = data.aws_route53_zone.app.zone_id
+  name    = var.domain_name
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.app.domain_name
+    zone_id                = aws_cloudfront_distribution.app.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "www" {
+  zone_id = data.aws_route53_zone.app.zone_id
+  name    = local.www_domain
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.app.domain_name
+    zone_id                = aws_cloudfront_distribution.app.hosted_zone_id
+    evaluate_target_health = false
   }
 }
 
@@ -304,12 +367,7 @@ resource "aws_s3_bucket_cors_configuration" "grabaciones" {
   bucket = aws_s3_bucket.grabaciones.id
   cors_rule {
     allowed_methods = ["PUT", "GET"]
-    allowed_origins = distinct(compact([
-      local.direct_ip_url,
-      local.sslip_url,
-      var.public_base_url,
-      var.cloudfront_fallback_enabled ? "https://${aws_cloudfront_distribution.app[0].domain_name}" : ""
-    ]))
+    allowed_origins = [local.public_url]
     allowed_headers = ["*"]
     expose_headers  = ["ETag"]
     max_age_seconds = 300
