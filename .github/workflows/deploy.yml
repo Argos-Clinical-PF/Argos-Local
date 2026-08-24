@@ -348,7 +348,7 @@ jobs:
 
       - name: Verificar apagado seguro
         id: shutdown_safety
-        if: success() && (github.event_name == 'push' || inputs.stop_after)
+        if: success() && (github.event_name == 'push' || inputs.stop_after) && vars.DETENER_EC2_TRAS_DEPLOY != 'false'
         run: |
           PARAMETERS=$(jq -cn '{commands:[
             "docker exec argos-backend wget -qO- http://localhost:8080/api/health/deployment-safety"
@@ -382,7 +382,7 @@ jobs:
           echo "safe=false" >> "$GITHUB_OUTPUT"
 
       - name: Detener EC2
-        if: always() && (github.event_name == 'push' || inputs.stop_after) && (failure() || steps.shutdown_safety.outputs.safe == 'true')
+        if: always() && (github.event_name == 'push' || inputs.stop_after) && vars.DETENER_EC2_TRAS_DEPLOY != 'false' && (failure() || steps.shutdown_safety.outputs.safe == 'true')
         run: |
           INSTANCE_ID="${{ steps.aws.outputs.instance_id }}"
           ESTADO=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
@@ -395,7 +395,7 @@ jobs:
           fi
 
       - name: Bloquear apagado con trabajo clínico activo
-        if: success() && (github.event_name == 'push' || inputs.stop_after) && steps.shutdown_safety.outputs.safe != 'true'
+        if: success() && (github.event_name == 'push' || inputs.stop_after) && vars.DETENER_EC2_TRAS_DEPLOY != 'false' && steps.shutdown_safety.outputs.safe != 'true'
         run: |
           echo "La release quedó activa porque hay sesiones, cargas o jobs post-sesión pendientes."
           exit 1

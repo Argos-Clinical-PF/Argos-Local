@@ -230,6 +230,27 @@ incluso si el despliegue falla.
 También se puede desplegar manualmente desde `Deploy MVP`, seleccionando los
 tags deseados y si la EC2 debe detenerse después de validar.
 
+## La EC2 se detiene sola después de cada release
+
+El workflow reutilizable de deploy apaga la instancia al terminar, incluso cuando el despliegue
+falla. Es deliberado —fuera de demos la EC2 no debe quedar encendida— pero tiene un efecto que
+sorprende: **cada merge a `main` deja el sitio abajo** hasta que alguien lo vuelve a levantar.
+
+Durante un período de demo eso es justamente lo que no se quiere. La variable de repositorio
+`DETENER_EC2_TRAS_DEPLOY` lo controla sin tocar el workflow:
+
+```bash
+# La instancia queda encendida después de cada deploy (período de demo)
+gh variable set DETENER_EC2_TRAS_DEPLOY --body false --repo Argos-Clinical-PF/Argos-Local
+
+# Vuelve al comportamiento de ahorro
+gh variable set DETENER_EC2_TRAS_DEPLOY --body true --repo Argos-Clinical-PF/Argos-Local
+```
+
+Con la variable en `false` **la instancia queda corriendo y genera costo**: hay que detenerla a
+mano al terminar, con `Operate MVP` acción `stop`. Antes y después de cada jornada de demo,
+confirmar el estado de la instancia.
+
 ## Costos
 
 Con la EC2 detenida se mantienen únicamente EBS, EIP, ECR, S3 de bajo uso y el dominio. No hay
