@@ -22,6 +22,11 @@ services:
       context: ../Argos-Backend
       target: development
     container_name: argos-backend
+    # Sobreescribe el CMD de la imagen, que trae `clean`. Va aqui y no en el Dockerfile porque
+    # depende del volumen `argos-backend-target` de abajo: con `target/` en un volumen propio no
+    # hay build del host con el que mezclarse, y `clean` ni siquiera puede borrar el punto de
+    # montaje ("Resource busy"). Ademas evita recompilar los 446 ficheros en cada reinicio.
+    command: ["./mvnw", "-B", "spring-boot:run"]
     env_file:
       - .env 
     environment:
@@ -79,6 +84,11 @@ services:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
       - ../Argos-Backend:/app
+      # `target/` va en un volumen propio del contenedor. Sin esto, `/app/target` es la carpeta
+      # real del repo: el `clean` del arranque borra el build del host y, si compilas fuera a la
+      # vez, los dos escriben los mismos .class y salen ilegibles a medias. Mismo patron que
+      # `node_modules` en el frontend.
+      - argos-backend-target:/app/target
       - argos-maven-cache:/root/.m2
     depends_on:
       postgres:
@@ -92,7 +102,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 40s
+      # El primer arranque compila 446 ficheros antes de abrir el puerto; 40s marcaba `unhealthy`
+      # un build entero antes de que la app pudiera responder.
+      start_period: 300s
     restart: unless-stopped
 
   frontend:
@@ -190,6 +202,7 @@ services:
 
 volumes:
   argos-postgres-data:
+  argos-backend-target:
   argos-maven-cache:
   argos-frontend-node-modules:
   argos-whisper-cache:
