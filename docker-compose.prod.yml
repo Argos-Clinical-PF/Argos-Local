@@ -68,9 +68,8 @@ services:
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: emotiefflib-enet-b0-8-va-mtl
-      # Calibracion de la confianza visual: se mueven JUNTAS. Ver .env.example y ADR-031.
-      EMOCIONES_VIDEO_TEMPERATURE: ${EMOCIONES_VIDEO_TEMPERATURE:-1.35}
-      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.387}
+      # ARGOS-193: temperature scaling eliminado (ver .env.example). Umbral sobre probabilidad sin escalar.
+      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.45}
       EMOCIONES_MOCK: "false"
       EMOCIONES_STRICT_LOAD: "true"
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-true}
