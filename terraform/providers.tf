@@ -47,15 +47,15 @@ variable "gpu_instance_type" {
   default     = "g5.xlarge"
 }
 
-variable "public_base_url" {
-  description = "Origen HTTPS adicional permitido. Vacio usa los endpoints administrados por Terraform."
-  default     = ""
-}
+variable "domain_name" {
+  description = "Dominio publico canonico de ARGOS Clinical."
+  type        = string
+  default     = "argosclinical.online"
 
-variable "cloudfront_fallback_enabled" {
-  description = "Publica un endpoint TLS/DNS estable de CloudFront mientras Route 53 Domains esta bloqueado."
-  type        = bool
-  default     = false
+  validation {
+    condition     = can(regex("^[a-z0-9.-]+$", var.domain_name)) && !startswith(var.domain_name, ".") && !endswith(var.domain_name, ".")
+    error_message = "domain_name debe ser un nombre DNS en minusculas y sin punto final."
+  }
 }
 
 variable "monthly_budget_usd" {
