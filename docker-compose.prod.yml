@@ -69,7 +69,7 @@ services:
     environment:
       EMOCIONES_MODEL_ID: emotiefflib-enet-b0-8-va-mtl
       # ARGOS-193: temperature scaling eliminado (ver .env.example). Umbral sobre probabilidad sin escalar.
-      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.45}
+      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0}
       EMOCIONES_MOCK: "false"
       EMOCIONES_STRICT_LOAD: "true"
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-true}

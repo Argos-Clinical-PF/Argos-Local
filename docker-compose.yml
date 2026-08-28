@@ -104,6 +104,7 @@ services:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
       VITE_APP_ENV: ${VITE_APP_ENV:-development}
       CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
+      VITE_FEATURE_SUSCRIPCIONES: ${VITE_FEATURE_SUSCRIPCIONES:-true}
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     volumes:
@@ -173,7 +174,7 @@ services:
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-va-mtl}
       # ARGOS-193: temperature scaling eliminado (ver .env.example). Umbral sobre probabilidad sin escalar.
-      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.45}
+      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0}
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
       EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-true}
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-true}
