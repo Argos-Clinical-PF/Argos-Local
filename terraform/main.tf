@@ -367,7 +367,7 @@ resource "aws_s3_bucket_cors_configuration" "grabaciones" {
   bucket = aws_s3_bucket.grabaciones.id
   cors_rule {
     allowed_methods = ["PUT", "GET"]
-    allowed_origins = [local.public_url]
+    allowed_origins = concat([local.public_url], var.dev_cors_origins)
     allowed_headers = ["*"]
     expose_headers  = ["ETag"]
     max_age_seconds = 300

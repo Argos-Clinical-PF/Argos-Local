@@ -9,5 +9,11 @@ gpu_instance_type = "g5.xlarge"
 
 domain_name = "argosclinical.online"
 
+# Solo para desarrollo local: habilita que http://localhost:5173 pueda subir partes multipart
+# al bucket real de grabaciones (CORS). Sin esto, toda subida de audio de procesamiento/retención
+# hecha en local contra el bucket real de AWS falla en el navegador, aunque la URL presignada y la
+# firma sean válidas. No descomentar en un tfvars que se vaya a aplicar contra producción.
+# dev_cors_origins = ["http://localhost:5173"]
+
 monthly_budget_usd = 25
 budget_email       = "95001@sistemas.frc.utn.edu.ar"

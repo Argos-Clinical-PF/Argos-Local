@@ -58,6 +58,12 @@ variable "domain_name" {
   }
 }
 
+variable "dev_cors_origins" {
+  description = "Origenes adicionales permitidos para subir partes multipart al bucket de grabaciones (aws_s3_bucket_cors_configuration.grabaciones), ademas del dominio publico. Pensado para el frontend de desarrollo local (http://localhost:5173): sin esto, cualquier subida de audio de procesamiento/retencion hecha en local contra el bucket real falla por CORS -el navegador nunca deja completar el PUT presignado- aunque la URL y la firma sean validas. Vacio por defecto para no tocar produccion; cada quien lo agrega en su propio terraform.tfvars (gitignored), nunca en este archivo."
+  type        = list(string)
+  default     = []
+}
+
 variable "monthly_budget_usd" {
   description = "Presupuesto mensual de seguridad para el MVP."
   default     = 25
