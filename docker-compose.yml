@@ -103,8 +103,8 @@ services:
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
       VITE_APP_ENV: ${VITE_APP_ENV:-development}
-      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
       VITE_FEATURE_SUSCRIPCIONES: ${VITE_FEATURE_SUSCRIPCIONES:-true}
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     volumes:
