@@ -115,6 +115,7 @@ services:
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
       VITE_APP_ENV: ${VITE_APP_ENV:-development}
+      VITE_FEATURE_SUSCRIPCIONES: ${VITE_FEATURE_SUSCRIPCIONES:-true}
       CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
@@ -184,9 +185,8 @@ services:
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-va-mtl}
-      # Calibracion de la confianza visual: se mueven JUNTAS. Ver .env.example.
-      EMOCIONES_VIDEO_TEMPERATURE: ${EMOCIONES_VIDEO_TEMPERATURE:-2.40}
-      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0.291}
+      # ARGOS-193: temperature scaling y umbral de confianza eliminados (ver .env.example).
+      EMOCIONES_VIDEO_MIN_CONFIDENCE: ${EMOCIONES_VIDEO_MIN_CONFIDENCE:-0}
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
       EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-true}
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-true}
