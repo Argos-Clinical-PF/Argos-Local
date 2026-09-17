@@ -1,5 +1,6 @@
 # Copiar a terraform.tfvars solamente si se necesita cambiar defaults.
-profile       = "argos-facu"
+# La cuenta nueva (616322963974) usa el perfil argos-nuevos; la vieja usaba argos-facu.
+profile       = "argos-nuevos"
 region        = "us-east-1"
 instance_type = "c7i.2xlarge"
 
@@ -8,6 +9,10 @@ demo_gpu         = false
 gpu_instance_type = "g5.xlarge"
 
 domain_name = "argosclinical.online"
+
+# WebACL propio asociado a CloudFront. Apagado por defecto: cuesta del orden de USD 9/mes.
+# Ver ADR-023 y MIGRACION-CUENTA-AWS.md antes de encenderlo.
+waf_habilitado = false
 
 monthly_budget_usd = 25
 budget_email       = "95001@sistemas.frc.utn.edu.ar"

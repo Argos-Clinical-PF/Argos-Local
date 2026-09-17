@@ -58,6 +58,12 @@ variable "domain_name" {
   }
 }
 
+variable "waf_habilitado" {
+  description = "Crea el WebACL propio y lo asocia a CloudFront. Cuesta del orden de USD 9/mes."
+  type        = bool
+  default     = false
+}
+
 variable "monthly_budget_usd" {
   description = "Presupuesto mensual de seguridad para el MVP."
   default     = 25
