@@ -29,8 +29,8 @@ variable "region" {
 }
 
 variable "profile" {
-  description = "Perfil AWS CLI (la cuenta FACU). NUNCA default."
-  default     = "argos-facu"
+  description = "Perfil AWS CLI de la cuenta donde se aplica (616322963974 = argos-nuevos)."
+  default     = "argos-nuevos"
 }
 
 variable "instance_type" {
@@ -56,6 +56,12 @@ variable "domain_name" {
     condition     = can(regex("^[a-z0-9.-]+$", var.domain_name)) && !startswith(var.domain_name, ".") && !endswith(var.domain_name, ".")
     error_message = "domain_name debe ser un nombre DNS en minusculas y sin punto final."
   }
+}
+
+variable "waf_habilitado" {
+  description = "Crea el WebACL propio y lo asocia a CloudFront. Cuesta del orden de USD 9/mes."
+  type        = bool
+  default     = false
 }
 
 variable "monthly_budget_usd" {
