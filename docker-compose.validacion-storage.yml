@@ -1,0 +1,33 @@
+# Solo datos sinteticos: no valida las garantias de seguridad de S3/KMS real.
+services:
+  s3-validacion:
+    image: localstack/localstack:4.0.3
+    environment:
+      SERVICES: s3,kms
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "127.0.0.1:4566:4566"
+    volumes:
+      - ./scripts/iniciar-s3-validacion.sh:/etc/localstack/init/ready.d/iniciar.sh:ro
+    mem_limit: 768m
+    healthcheck:
+      test: [CMD-SHELL, "awslocal s3api head-bucket --bucket argos-validacion >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  backend:
+    environment:
+      ARGOS_S3_ENDPOINT: http://s3-validacion:4566
+      ARGOS_S3_PUBLIC_ENDPOINT: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      RECORDINGS_ENABLED: "true"
+      PROCESSING_AUDIO_ENABLED: "true"
+      RECORDINGS_BUCKET: argos-validacion
+      RECORDINGS_KMS_KEY_ID: alias/aws/s3
+    depends_on:
+      s3-validacion:
+        condition: service_healthy

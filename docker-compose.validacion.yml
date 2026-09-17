@@ -1,0 +1,91 @@
+# Entorno aislado de aceptacion local. No carga .env ni credenciales de AWS.
+# Reutiliza los servicios IA locales de los puertos 9000/9010; no levanta otros modelos.
+name: argos-validacion
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: argos_validacion
+      POSTGRES_USER: argos_local
+      POSTGRES_PASSWORD: argos_solo_validacion_local
+    volumes:
+      - datos-validacion:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U argos_local -d argos_validacion"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    mem_limit: 384m
+
+  backend:
+    build:
+      context: ../Argos-Backend
+      target: development
+    command: ["./mvnw", "-B", "spring-boot:run", "-DskipTests"]
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/argos_validacion
+      DB_USERNAME: argos_local
+      DB_PASSWORD: argos_solo_validacion_local
+      APP_PUBLIC_BASE_URL: http://localhost:5173
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      APP_DEMO_SEED_ENABLED: "true"
+      MAIL_HOST: localhost
+      MAIL_PORT: 1025
+      MAIL_SMTP_AUTH: "false"
+      MAIL_SMTP_STARTTLS_ENABLE: "false"
+      # La cuenta sintetica del seed ya esta verificada: no se envia correo real.
+      ANTHROPIC_API_KEY: ${ARGOS_VALIDACION_ANTHROPIC_API_KEY:-}
+      RECORDINGS_ENABLED: "false"
+      PROCESSING_AUDIO_ENABLED: "false"
+      AWS_EC2_METADATA_DISABLED: "true"
+      TRANSCRIPCION_SERVICE_URL: http://host.docker.internal:9000
+      EMOCIONES_SERVICE_URL: http://host.docker.internal:9010
+      JAVA_TOOL_OPTIONS: -Xmx768m
+      MAVEN_OPTS: -Xmx384m
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ../Argos-Backend:/app
+      # Evita que mvn clean dentro del contenedor borre las pruebas compiladas del host.
+      - compilacion-validacion:/app/target
+      - cache-maven:/root/.m2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 4s
+      retries: 60
+      start_period: 40s
+    mem_limit: 1536m
+
+  frontend:
+    build:
+      context: ../Argos-Frontend
+      target: development
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+      VITE_APP_ENV: development
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ../Argos-Frontend:/app
+      - dependencias-frontend:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:5173/]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 768m
+
+volumes:
+  datos-validacion:
+  compilacion-validacion:
+  dependencias-frontend:
+  cache-maven:
+    external: true
+    name: argos-local_argos-maven-cache
