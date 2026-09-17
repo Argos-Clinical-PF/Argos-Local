@@ -55,7 +55,7 @@ concurrency:
 
 env:
   AWS_REGION: us-east-1
-  AWS_ROLE_ARN: arn:aws:iam::915093573341:role/argos-github-actions
+  AWS_ROLE_ARN: arn:aws:iam::616322963974:role/argos-github-actions
 
 jobs:
   release:

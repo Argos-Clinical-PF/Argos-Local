@@ -131,6 +131,22 @@ resource "aws_eip" "app" {
 }
 
 locals {
+  # Reglas que inspeccionan el cuerpo de la request, prefijadas por grupo administrado.
+  prefijo_por_grupo = {
+    "AWSManagedRulesAmazonIpReputationList" = "ip:"
+    "AWSManagedRulesCommonRuleSet"          = "comun:"
+    "AWSManagedRulesKnownBadInputsRuleSet"  = "malos:"
+  }
+  reglas_que_inspeccionan_cuerpo = [
+    "comun:SizeRestrictions_BODY",
+    "comun:CrossSiteScripting_BODY",
+    "comun:GenericLFI_BODY",
+    "comun:GenericRFI_BODY",
+    "comun:EC2MetaDataSSRF_BODY",
+    "malos:Log4JRCE_BODY",
+    "malos:JavaDeserializationRCE_BODY",
+  ]
+
   public_url    = "https://${var.domain_name}"
   www_domain    = "www.${var.domain_name}"
   origin_domain = "origin.${var.domain_name}"
@@ -145,28 +161,164 @@ data "aws_cloudfront_origin_request_policy" "todos_sin_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
-data "aws_route53_zone" "app" {
-  name         = var.domain_name
-  private_zone = false
+# La zona y el certificado se crean acá: en una cuenta nueva no existe nada que leer, y
+# dejarlos como `data` obligaba a prepararlos a mano antes del primer apply.
+resource "aws_route53_zone" "app" {
+  name    = var.domain_name
+  comment = "ARGOS - zona publica del dominio"
 }
 
-data "aws_acm_certificate" "app" {
-  domain      = var.domain_name
-  statuses    = ["ISSUED"]
-  most_recent = true
+resource "aws_acm_certificate" "app" {
+  domain_name               = var.domain_name
+  subject_alternative_names = ["*.${var.domain_name}"]
+  validation_method         = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "validacion_certificado" {
+  for_each = {
+    for opcion in aws_acm_certificate.app.domain_validation_options :
+    opcion.domain_name => opcion
+  }
+
+  zone_id         = aws_route53_zone.app.zone_id
+  name            = each.value.resource_record_name
+  type            = each.value.resource_record_type
+  records         = [each.value.resource_record_value]
+  ttl             = 60
+  allow_overwrite = true
+}
+
+# El apply espera acá hasta que ACM valida por DNS. Sin esto, CloudFront falla al asociar un
+# certificado que todavia esta PENDING_VALIDATION.
+resource "aws_acm_certificate_validation" "app" {
+  certificate_arn         = aws_acm_certificate.app.arn
+  validation_record_fqdns = [for registro in aws_route53_record.validacion_certificado : registro.fqdn]
 }
 
 resource "aws_route53_record" "origin" {
-  zone_id = data.aws_route53_zone.app.zone_id
+  zone_id = aws_route53_zone.app.zone_id
   name    = local.origin_domain
   type    = "A"
   ttl     = 60
   records = [aws_eip.app.public_ip]
 }
 
-data "aws_wafv2_web_acl" "app" {
-  name  = "CreatedByCloudFront-8f1a9620"
+# WAF propio, no el que crea el asistente de CloudFront: aquel queda atado a una suscripcion de
+# plan de precios que no admite reglas propias, no se puede desasociar y solo se cancela desde la
+# consola (ADR-023). Creando la distribucion por Terraform no existe esa suscripcion.
+#
+# Apagado por defecto: cuesta del orden de USD 9/mes y la cuenta arranca sin credito. Encenderlo es
+# cambiar una variable; el codigo ya contempla las rutas multipart para no repetir el bloqueo
+# silencioso de las subidas que documenta el ADR.
+resource "aws_wafv2_regex_pattern_set" "subidas" {
+  count = var.waf_habilitado ? 1 : 0
+  name  = "argos-rutas-multipart"
   scope = "CLOUDFRONT"
+
+  # Las tres unicas rutas cuyo cuerpo supera los 8 KB que inspecciona el CommonRuleSet.
+  regular_expression {
+    regex_string = "^/api/sessions/[^/]+/transcripcion$"
+  }
+  regular_expression {
+    regex_string = "^/api/sessions/[^/]+/analisis-emocional/video$"
+  }
+  regular_expression {
+    regex_string = "^/api/perfil/foto$"
+  }
+}
+
+resource "aws_wafv2_web_acl" "app" {
+  count = var.waf_habilitado ? 1 : 0
+  name  = "argos-web-acl"
+  scope = "CLOUDFRONT"
+
+  default_action {
+    allow {}
+  }
+
+  # Prioridad 0: las subidas multipart se resuelven antes de llegar a los grupos administrados.
+  rule {
+    name     = "permitir-subidas-multipart"
+    priority = 0
+
+    action {
+      allow {}
+    }
+
+    statement {
+      regex_pattern_set_reference_statement {
+        arn = aws_wafv2_regex_pattern_set.subidas[0].arn
+        field_to_match {
+          uri_path {}
+        }
+        text_transformation {
+          priority = 0
+          type     = "NONE"
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "argos-subidas-multipart"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  dynamic "rule" {
+    for_each = {
+      "AWSManagedRulesAmazonIpReputationList" = 1
+      "AWSManagedRulesCommonRuleSet"          = 2
+      "AWSManagedRulesKnownBadInputsRuleSet"  = 3
+    }
+
+    content {
+      name     = rule.key
+      priority = rule.value
+
+      override_action {
+        none {}
+      }
+
+      statement {
+        managed_rule_group_statement {
+          vendor_name = "AWS"
+          name        = rule.key
+
+          # Segunda red: las reglas que miran el cuerpo quedan en Count. Aunque una ruta de subida
+          # se escape del patron de arriba, no se convierte en un 403 sin explicacion.
+          dynamic "rule_action_override" {
+            for_each = toset([
+              for regla in local.reglas_que_inspeccionan_cuerpo : regla
+              if startswith(regla, local.prefijo_por_grupo[rule.key])
+            ])
+            content {
+              name = trimprefix(rule_action_override.value, local.prefijo_por_grupo[rule.key])
+              action_to_use {
+                count {}
+              }
+            }
+          }
+        }
+      }
+
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = rule.key
+        sampled_requests_enabled   = true
+      }
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "argos-web-acl"
+    sampled_requests_enabled   = true
+  }
 }
 
 # Canonicaliza el host en el borde: `www` responde 301 al dominio raíz. Ver
@@ -186,7 +338,7 @@ resource "aws_cloudfront_distribution" "app" {
   price_class         = "PriceClass_All"
   wait_for_deployment = true
   http_version        = "http2"
-  web_acl_id          = data.aws_wafv2_web_acl.app.arn
+  web_acl_id          = var.waf_habilitado ? aws_wafv2_web_acl.app[0].arn : null
 
   origin {
     domain_name = aws_route53_record.origin.fqdn
@@ -223,7 +375,7 @@ resource "aws_cloudfront_distribution" "app" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = data.aws_acm_certificate.app.arn
+    acm_certificate_arn      = aws_acm_certificate_validation.app.certificate_arn
     minimum_protocol_version = "TLSv1.2_2021"
     ssl_support_method       = "sni-only"
   }
@@ -234,7 +386,7 @@ resource "aws_cloudfront_distribution" "app" {
 }
 
 resource "aws_route53_record" "apex" {
-  zone_id = data.aws_route53_zone.app.zone_id
+  zone_id = aws_route53_zone.app.zone_id
   name    = var.domain_name
   type    = "A"
 
@@ -246,7 +398,7 @@ resource "aws_route53_record" "apex" {
 }
 
 resource "aws_route53_record" "www" {
-  zone_id = data.aws_route53_zone.app.zone_id
+  zone_id = aws_route53_zone.app.zone_id
   name    = local.www_domain
   type    = "A"
 
