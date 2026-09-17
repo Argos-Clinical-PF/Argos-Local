@@ -97,8 +97,15 @@ Por eso, durante el corte, los dos parámetros apuntan a la instancia nueva por 
 
 | Parámetro | Durante el corte | Después de mover los NS |
 |---|---|---|
-| `/argos/mvp/public-base-url` | `https://184-193-224-236.sslip.io` | `https://argosclinical.online` |
-| `/argos/mvp/origin-base-url` | `https://184.193.224.236` | `https://origin.argosclinical.online` |
+| `/argos/mvp/public-base-url` | `https://nuevo.argosclinical.online` | `https://argosclinical.online` |
+| `/argos/mvp/origin-base-url` | `https://nuevo.argosclinical.online` | `https://origin.argosclinical.online` |
+
+`nuevo.argosclinical.online` es un registro A hacia la instancia nueva, creado en **las dos zonas**:
+en la vieja (que es la autoritativa hasta que se muevan los NS) y en la nueva, así sobrevive al
+corte. Existe porque `sslip.io`, que es lo que arma `deploy-mvp.sh` cuando el origen es una IP
+desnuda, no resuelve detrás de muchos routers domésticos: la protección contra DNS rebinding lo
+bloquea y el navegador falla antes de llegar al servidor. Con un nombre del dominio propio, Caddy
+además emite un certificado real para él.
 
 ```bash
 aws ssm put-parameter --profile argos-nuevos --overwrite --type String \
