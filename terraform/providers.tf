@@ -29,8 +29,8 @@ variable "region" {
 }
 
 variable "profile" {
-  description = "Perfil AWS CLI (la cuenta FACU). NUNCA default."
-  default     = "argos-facu"
+  description = "Perfil AWS CLI de la cuenta donde se aplica (616322963974 = argos-nuevos)."
+  default     = "argos-nuevos"
 }
 
 variable "instance_type" {

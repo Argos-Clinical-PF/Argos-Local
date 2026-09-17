@@ -87,6 +87,54 @@ terraform plan
    Lo que el destroy no cubre (creado a mano en su momento): la zona vieja, el certificado viejo y
    la suscripción del plan de precios de CloudFront, que se cancela desde la consola.
 
+## Ventana de corte: parámetros que cambian dos veces
+
+Mientras los NS sigan apuntando a la cuenta vieja, el dominio lo sirve el stack viejo. Si el deploy
+se valida contra el dominio, el smoke test pasa contra la cuenta muerta y no prueba nada, y Caddy
+pide un certificado para `origin.argosclinical.online`, que resuelve a la IP vieja y nunca se emite.
+
+Por eso, durante el corte, los dos parámetros apuntan a la instancia nueva por IP:
+
+| Parámetro | Durante el corte | Después de mover los NS |
+|---|---|---|
+| `/argos/mvp/public-base-url` | `https://184-193-224-236.sslip.io` | `https://argosclinical.online` |
+| `/argos/mvp/origin-base-url` | `https://184.193.224.236` | `https://origin.argosclinical.online` |
+
+```bash
+aws ssm put-parameter --profile argos-nuevos --overwrite --type String \
+  --name /argos/mvp/public-base-url --value https://argosclinical.online
+aws ssm put-parameter --profile argos-nuevos --overwrite --type String \
+  --name /argos/mvp/origin-base-url --value https://origin.argosclinical.online
+```
+
+Volver a desplegar después de cambiarlos: el `.env` de la instancia se arma con esos valores.
+
+## Lo que encontró la auditoría previa al corte
+
+Ya corregido en este commit:
+
+- `Argos-Entrenamiento` seguía publicando las imágenes de transcripción y emociones contra el rol
+  de la cuenta muerta. Es el repo que construye esas dos imágenes; ningún otro las construye.
+- El presupuesto medía gasto **neto de crédito**: marcaba USD 0,00 y solo iba a avisar cuando el
+  crédito ya estuviera consumido, que es como murió la cuenta anterior.
+- El rol de GitHub Actions confiaba en cualquier rama de los cinco repos.
+- El ciclo de vida del bucket de operación no cubría `respaldo-migracion/`, así que el volcado con
+  las historias clínicas se quedaba ahí para siempre.
+- ECR conservaba 15 imágenes por repo (unos 19 GB); ahora 5.
+- El default de `var.profile` era `argos-facu`: un clon nuevo aplicaba contra la cuenta muerta.
+
+Pendiente, para después del corte:
+
+- La cuenta vieja sigue gastando del orden de USD 11/mes con todo apagado, incluida una IP elástica
+  huérfana en **us-east-2** que ningún terraform maneja (`eipalloc-0e5f635693a39ec2a`).
+- Los 8 SecureString siguen existiendo en la cuenta vieja, idénticos a los nuevos. Borrarlos al
+  vaciarla, o rotarlos.
+- En la cuenta vieja hay usuarios con AdministratorAccess y claves estáticas activas que nadie usa.
+- `operate.yml` con `action=start` corre `refresh-ip-certificate.sh`, que no existe hasta el primer
+  deploy: encender la instancia desde el workflow falla en una máquina recién creada.
+- El data source de la AMI matchea también las variantes ECS y minimal, así que la instancia nueva
+  no arrancó sobre la misma imagen que la vieja.
+
 ## Qué no se migra
 
 - **Bucket de grabaciones**: estaba vacío. Las grabaciones se borran solas al vencer la retención

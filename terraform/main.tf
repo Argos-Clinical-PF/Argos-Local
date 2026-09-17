@@ -53,7 +53,7 @@ resource "aws_ecr_lifecycle_policy" "repos" {
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
-        countNumber = 15
+        countNumber = 5
       }
       action = {
         type = "expire"
@@ -482,6 +482,19 @@ resource "aws_s3_bucket_lifecycle_configuration" "operacion" {
       days = 30
     }
   }
+  # El volcado de la migración es una copia completa de historias clínicas: vive lo que dura el
+  # corte y se va solo, aunque el script falle antes de borrarlo.
+  rule {
+    id     = "respaldo-migracion-7d"
+    status = "Enabled"
+    filter {
+      prefix = "respaldo-migracion/"
+    }
+    expiration {
+      days = 7
+    }
+  }
+
 }
 
 resource "aws_s3_bucket" "grabaciones" {
@@ -744,10 +757,10 @@ resource "aws_iam_role" "github_actions" {
         }
         StringLike = {
           "token.actions.githubusercontent.com:sub" = [
-            "repo:Argos-Clinical-PF/Argos-Backend:*",
-            "repo:Argos-Clinical-PF/Argos-Frontend:*",
-            "repo:Argos-Clinical-PF/Argos-Local:*",
-            "repo:Argos-Clinical-PF/Argos-Entrenamiento:*"
+            "repo:Argos-Clinical-PF/Argos-Backend:ref:refs/heads/main",
+            "repo:Argos-Clinical-PF/Argos-Frontend:ref:refs/heads/main",
+            "repo:Argos-Clinical-PF/Argos-Local:ref:refs/heads/main",
+            "repo:Argos-Clinical-PF/Argos-Entrenamiento:ref:refs/heads/main"
           ]
         }
       }
@@ -816,6 +829,15 @@ resource "aws_iam_role_policy" "github_actions" {
 }
 
 resource "aws_budgets_budget" "mensual" {
+  # Sin esto el presupuesto mide gasto NETO de crédito: marca USD 0,00 hasta que el crédito se
+  # agota y recién ahí avisa, que es como se quedó sin nada la cuenta anterior. Con el uso bruto,
+  # los avisos llegan mientras todavía hay crédito para reaccionar.
+  cost_types {
+    include_credit   = false
+    include_refund   = false
+    include_discount = false
+  }
+
   name         = "argos-mvp-mensual"
   budget_type  = "COST"
   limit_amount = tostring(var.monthly_budget_usd)
