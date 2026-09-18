@@ -107,7 +107,19 @@ umask 077
   # Nota clinica (Epica 5) y cifrado en reposo (ADR-007). Si el parametro no existe,
   # se escribe vacio: el backend degrada con claridad (503 IA / sin cifrado) sin romper el deploy.
   printf 'ANTHROPIC_API_KEY=%s\n' "$(get_parameter anthropic-api-key 2>/dev/null || true)"
-  printf 'ANTHROPIC_MODEL=claude-sonnet-5\n'
+  # ANTHROPIC (API publica con clave) o BEDROCK (dentro de la cuenta, autenticacion IAM). Con
+  # BEDROCK los identificadores son perfiles de inferencia, no nombres de modelo.
+  IA_PROVEEDOR_VALUE="$(get_parameter_optional ia-proveedor)"
+  IA_PROVEEDOR_VALUE="${IA_PROVEEDOR_VALUE:-ANTHROPIC}"
+  printf 'IA_PROVEEDOR=%s\n' "$IA_PROVEEDOR_VALUE"
+  if [ "$IA_PROVEEDOR_VALUE" = "BEDROCK" ]; then
+    MODELO_NOTA="$(get_parameter_optional ia-bedrock-modelo-nota)"
+    MODELO_TEMAS="$(get_parameter_optional ia-bedrock-modelo-temas)"
+    printf 'ANTHROPIC_MODEL=%s\n' "${MODELO_NOTA:-us.anthropic.claude-sonnet-5}"
+    printf 'ANTHROPIC_TOPICS_MODEL=%s\n' "${MODELO_TEMAS:-us.anthropic.claude-haiku-4-5-20251001-v1:0}"
+  else
+    printf 'ANTHROPIC_MODEL=claude-sonnet-5\n'
+  fi
   printf 'ENCRYPTION_KEY=%s\n' "$(get_parameter encryption-key 2>/dev/null || true)"
   # Back Office: credenciales del primer ADMIN_PLATAFORMA. Se aplican una sola vez, cuando la
   # tabla administradores esta vacia (AdminSeedRunner). Si el parametro no existe en SSM, se

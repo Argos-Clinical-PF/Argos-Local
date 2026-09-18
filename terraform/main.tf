@@ -731,6 +731,27 @@ resource "aws_iam_role_policy" "ec2_operacion" {
   })
 }
 
+resource "aws_iam_role_policy" "ec2_bedrock" {
+  name = "argos-ec2-bedrock"
+  role = aws_iam_role.ec2.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      # Solo los modelos que usa la nota clínica, por perfil de inferencia y por modelo base: el
+      # perfil enruta entre regiones de EE.UU. y hace falta permitir las dos formas del ARN.
+      Resource = [
+        "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
+        "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*.anthropic.claude-*"
+      ]
+    }]
+  })
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
   client_id_list = [
