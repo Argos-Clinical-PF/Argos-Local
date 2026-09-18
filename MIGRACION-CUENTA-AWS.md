@@ -14,10 +14,10 @@ no hay transferencia de dominio, solo un cambio de NS.
 | Respaldo de fotos de perfil | Hecho, vacío (no había ninguna) |
 | Copia de los 12 parámetros `/argos/mvp/*` | Hecha. `encryption-key` verificada por huella SHA-256: idéntica en ambas cuentas |
 | Terraform listo para la cuenta nueva | Hecho. `terraform plan` en el workspace `cuenta-nueva`: 48 recursos a crear, 0 a cambiar |
-| Apply en la cuenta nueva | **Pendiente de autorización** |
-| Cambio de NS en el registrador | Pendiente |
-| Despliegue y restauración de la base | Pendiente |
-| Borrado de la cuenta vieja | Pendiente, al final |
+| Apply en la cuenta nueva | Hecho (18/09/2026): certificado validado desde la zona vieja, CloudFront y apex/www creados |
+| Cambio de NS en el registrador | Pendiente (recomendado, ya no bloquea: la zona vieja apunta al stack nuevo) |
+| Despliegue y restauración de la base | Hecho |
+| Borrado de la cuenta vieja | Hecho salvo la distribución de CloudFront (plan de precios) y el usuario `ia` |
 
 La instancia vieja quedó **detenida** otra vez después del respaldo.
 
@@ -154,3 +154,27 @@ Pendiente, para después del corte:
 - **Bucket de operación**: solo artefactos de despliegue y benchmarks; los regenera el próximo
   deploy.
 - **Imágenes ECR**: las reconstruye CI.
+
+## Estado al 18/09/2026: el dominio ya sirve el stack nuevo sin cambiar los NS
+
+El certificado de la cuenta nueva se validó agregando su CNAME de validación a la zona vieja,
+que sigue siendo la autoritativa. Con eso el `apply` de la cuenta nueva creó CloudFront
+(`E1NVBUHYJC6UL0`, `d1x0lx8lzaiakb.cloudfront.net`) y los registros apex/www en la zona nueva; en
+la zona vieja se apuntaron a mano apex y www (alias a esa distribución) y `origin` (A a la
+instancia nueva). Los parámetros `public-base-url` y `origin-base-url` ya valen el dominio.
+
+El cambio de NS en Hostinger sigue siendo lo correcto (la zona nueva tiene los mismos registros),
+pero ya no condiciona nada. Después del cambio, vaciar `origenes_cors_adicionales` en el
+terraform.tfvars local y aplicar.
+
+De la cuenta vieja se destruyó todo el stack (Terraform, workspace `default`, `-var
+profile=argos-facu`), se vaciaron los buckets y el ECR, se liberó la IP elástica de us-east-2, se
+borraron los 12 parámetros SSM, el presupuesto manual, `rds-monitoring-role` y los usuarios IAM
+con claves estáticas. Los dos respaldos de la base están en
+`s3://argos-mvp-operacion-616322963974/respaldo-migracion/`. Queda, a mano y con root:
+
+- Cancelar el "plan de precios" de CloudFront en la consola de la cuenta vieja y borrar la
+  distribución `E2E1XIDYBFNZI9` (ya deshabilitada y sin aliases; la API no deja borrarla mientras
+  esté suscripta al plan y la CLI no tiene comando para cancelarlo).
+- Borrar el certificado ACM viejo cuando no quede ninguna distribución.
+- Borrar el usuario `ia` (son las credenciales con las que se hizo la limpieza) y cerrar la cuenta.
