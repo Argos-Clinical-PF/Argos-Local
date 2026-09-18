@@ -16,3 +16,6 @@ waf_habilitado = false
 
 monthly_budget_usd = 25
 budget_email       = "95001@sistemas.frc.utn.edu.ar"
+
+# Host provisorio hasta el cambio de NS; vaciar después (ver MIGRACION-CUENTA-AWS.md).
+origenes_cors_adicionales = []

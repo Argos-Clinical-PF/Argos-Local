@@ -73,3 +73,13 @@ variable "budget_email" {
   description = "Correo que recibe alertas de AWS Budgets."
   default     = "95001@sistemas.frc.utn.edu.ar"
 }
+
+# Orígenes extra para las subidas directas del navegador al bucket de grabaciones. El bucket sólo
+# admite `https://<domain_name>`; mientras la app se sirva desde un host provisorio (hoy
+# https://nuevo.argosclinical.online, hasta el cambio de NS) hay que listarlo acá o ninguna parte
+# llega a S3 y las grabaciones quedan en INICIADA. Vaciar cuando el dominio definitivo esté activo.
+variable "origenes_cors_adicionales" {
+  description = "Orígenes adicionales (https://host) permitidos por CORS en el bucket de grabaciones."
+  type        = list(string)
+  default     = []
+}

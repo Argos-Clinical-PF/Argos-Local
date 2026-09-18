@@ -99,6 +99,7 @@ Por eso, durante el corte, los dos parámetros apuntan a la instancia nueva por 
 |---|---|---|
 | `/argos/mvp/public-base-url` | `https://nuevo.argosclinical.online` | `https://argosclinical.online` |
 | `/argos/mvp/origin-base-url` | `https://nuevo.argosclinical.online` | `https://origin.argosclinical.online` |
+| `origenes_cors_adicionales` (terraform.tfvars, local) | `["https://nuevo.argosclinical.online"]` | `[]` |
 
 `nuevo.argosclinical.online` es un registro A hacia la instancia nueva, creado en **las dos zonas**:
 en la vieja (que es la autoritativa hasta que se muevan los NS) y en la nueva, así sobrevive al
@@ -132,6 +133,10 @@ Ya corregido en este commit:
 
 Pendiente, para después del corte:
 
+- El bucket de grabaciones sólo admite CORS desde `https://<domain_name>`. Mientras la app se sirve
+  desde `nuevo.argosclinical.online`, ese host va en `origenes_cors_adicionales` (terraform.tfvars,
+  que no se versiona) o el navegador no puede subir ninguna parte y las grabaciones quedan en
+  `INICIADA` sin que nadie lo note: así pasó el 18/09. Al mover los NS, vaciar la lista y aplicar.
 - La cuenta vieja sigue gastando del orden de USD 11/mes con todo apagado, incluida una IP elástica
   huérfana en **us-east-2** que ningún terraform maneja (`eipalloc-0e5f635693a39ec2a`).
 - Los 8 SecureString siguen existiendo en la cuenta vieja, idénticos a los nuevos. Borrarlos al
