@@ -1,7 +1,8 @@
 # Plan de estabilización tras la primera prueba con un psicólogo (19/09/2026)
 
 Prueba real hecha el sábado 19/09 con la última versión desplegada, a través del dominio
-(CloudFront). La instancia estuvo encendida de 13:58 a 17:16 (hora de Argentina). Lo reportado, por
+(CloudFront). La instancia estuvo encendida de 13:58 a 17:16 (hora de Argentina) y la prueba fue en
+esa ventana: los logs a revisar son los del 19/09 entre las 17:00 y las 20:16 UTC. Lo reportado, por
 prioridad. Regla del plan: primero reproducir y medir, después corregir; cada corrección con su
 prueba automática.
 
@@ -31,18 +32,27 @@ estado. Corrección: la fuente de verdad es el backend; un consentimiento otorga
 ## P1. Confunde, no pierde datos (semana del 21/09)
 
 **4. El porcentaje del post-sesión sube a 50 %, vuelve a 0 % y repite.**
-El avance es una estimación por intento (`ServicioProcesoPostSesion.estimar`); cada reintento lo
-reinicia. Hay dos cosas: averiguar por qué reintenta (mirar `intentos` y el error de esa sesión) y
-hacer el avance monótono, por etapas del proceso y no por intento. Nunca debe bajar.
+Causa observada: la nota generada no pasa la validación ("la nota clínica no cumple con el criterio
+de observaciones") y se vuelve a generar; cada reintento reinicia el avance
+(`ServicioProcesoPostSesion.estimar`). Son tres correcciones:
+- El avance es monótono y por etapas: un reintento de la nota no lo baja ni lo reinicia.
+- Revisar el criterio que falla contra notas reales de Bedrock: si rechaza notas clínicamente
+  válidas, es demasiado estricto. Cada rechazo cuesta una generación completa, en tiempo y en dinero.
+- Tope de reintentos (dos). Si sigue sin cumplir, la nota queda como borrador con un aviso de qué
+  revisar, en vez de seguir en bucle. El profesional siempre la revisa antes de firmar.
+Esos avisos son internos: no se le muestran al profesional durante el proceso.
 
 **5. El panel lateral (Evidencia, Grabaciones, Asistente) es angosto y corta el texto.**
 Hacerlo redimensionable arrastrando el borde (mínimo 320 px, máximo 60 %), con un botón para
 ampliarlo a media pantalla, y que el texto de la evidencia envuelva en vez de cortarse.
 
-**6. Cuesta encontrar cómo iniciar la sesión.**
-Pedirle al psicólogo en qué pantalla estaba. Propuesta: cuando hay una sesión agendada dentro de
-los próximos 30 minutos, un botón fijo "Iniciar sesión con <alias>" en la barra superior, en
-cualquier pantalla.
+**6. Cuesta encontrar menús, botones y acciones, en general.**
+No es un botón puntual: es la facilidad de uso de toda la aplicación. Dos pasos:
+- Prueba guiada con el psicólogo: cinco tareas sin ayuda (agendar, preparar e iniciar una sesión,
+  encontrar una grabación, firmar una nota, ver la evolución de un paciente), anotando dónde duda.
+- Con eso, corregir lo que más frene: una acción principal evidente por pantalla, nombres del menú
+  en palabras del profesional, y un botón fijo "Iniciar sesión con <alias>" en la barra superior
+  cuando hay una sesión agendada en los próximos 30 minutos.
 
 ## P2. Requisitos no funcionales, nunca probados (semana del 28/09)
 
