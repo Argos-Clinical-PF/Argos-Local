@@ -178,3 +178,27 @@ con claves estáticas. Los dos respaldos de la base están en
   esté suscripta al plan y la CLI no tiene comando para cancelarlo).
 - Borrar el certificado ACM viejo cuando no quede ninguna distribución.
 - Borrar el usuario `ia` (son las credenciales con las que se hizo la limpieza) y cerrar la cuenta.
+
+## Estado final de la cuenta vieja (18/09/2026, noche)
+
+Se borraron además el servidor viejo `argos-app` (estaba detenido, con su disco de 30 GB y una IP
+elástica que seguía facturando), sus grupos de seguridad, el rol `argos-ec2-role`, el certificado
+ACM viejo, el grupo de logs `RDSOSMetrics` y la función de CloudFront `argos-redirigir-www`. Un
+barrido de us-east-1 y us-east-2 no encuentra cómputo, discos, IPs, bases, buckets, ECR, Lambda,
+secretos ni parámetros.
+
+Quedan tres cosas, y ninguna se puede hacer por API:
+
+1. La distribución `E2E1XIDYBFNZI9` (deshabilitada, sin aliases ni función) y su web ACL
+   `CreatedByCloudFront-8f1a9620`: CloudFront rechaza el borrado mientras esté suscripta a un plan
+   de precios, y el plan sólo se cancela desde la consola.
+2. La zona `Z03344893A9BFMHR78Q0W`, que **sigue siendo la autoritativa** del dominio. No se borra
+   ni se cierra la cuenta hasta cambiar los NS en Hostinger: cerrarla antes deja el sitio sin DNS.
+3. El usuario `ia`: ya no es administrador. Sólo puede leer y editar esa zona y borrar esa
+   distribución (política `solo-dns-y-distribucion-vieja`), con una sola clave. Se conserva porque
+   es la única forma, fuera de root, de corregir el DNS en producción hasta el cambio de NS.
+
+Orden para terminar, con root: cambiar los NS en Hostinger y esperar la propagación; entrar a la
+consola, CloudFront, cancelar el plan de precios de la distribución; cerrar la cuenta (Account,
+Close account). El cierre elimina la distribución, la zona y el usuario `ia`.
+
