@@ -98,6 +98,9 @@ umask 077
   printf 'WHISPER_IDIOMA=es\n'
   printf 'WHISPER_BEAM_SIZE=3\n'
   printf 'WHISPER_REFINEMENT_BEAM_SIZE=5\n'
+  # Modelo del pase post-sesión (vacío = el mismo que en vivo). Ver servicio-transcripcion/app.py.
+  printf 'WHISPER_REFINEMENT_MODEL=%s\n' "$(get_parameter_optional whisper-refinement-model)"
+  printf 'WHISPER_REFINEMENT_CPU_THREADS=6\n'
   printf 'WHISPER_HOTWORDS=\n'
   printf 'WHISPER_MAX_REFINEMENT_AUDIO_BYTES=134217728\n'
   printf 'WHISPER_CPU_THREADS=4\n'
