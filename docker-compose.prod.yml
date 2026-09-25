@@ -105,6 +105,9 @@ services:
       EMOCIONES_ENABLED: "true"
       EMOCIONES_TIMEOUT_MS: "5000"
       JWT_SECRET: ${JWT_SECRET}
+      # La documentación interactiva de la API no se publica en producción.
+      SPRINGDOC_APIDOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGERUI_ENABLED: "false"
       JWT_ACCESS_MINUTES: "15"
       JWT_ISSUER: argos-clinical
       MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
