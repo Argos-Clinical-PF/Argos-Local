@@ -72,3 +72,28 @@ Definir metas y medirlas, en vez de suponer que "es pesado":
 - Respaldos automáticos de la base (hoy solo existe el snapshot manual `snap-0eb7e39e92e8599a8`).
 - Pasos con root en la cuenta vieja de AWS, en orden: NS en Hostinger, cancelar el plan de
   CloudFront, cerrar la cuenta.
+
+## Estado al 25/09/2026
+
+Hecho y desplegado (Frontend PR #125, Backend PR #83):
+- P0-1, P0-2 y P0-3 tenían una causa común: cada renovación del token de acceso (cada 15 minutos)
+  cambiaba el token que ven los componentes y re-disparaba 25 efectos. La página de la sesión en vivo
+  volvía a cargar, desmontaba la sala y cancelaba la grabación; el consentimiento volvía a su paso
+  inicial. Además el reintento posterior al refresh salía con el token viejo. Corregido en el
+  proveedor de sesión, con prueba. Los logs del 19/09 ya no existían (el deploy del 22/09 recreó los
+  contenedores); la causa se encontró en el código.
+- P1-4: la nota fallaba siempre en "observaciones" porque el prompt pedía una frase sin nada que
+  citar. Prompt alineado, se conservan las frases citadas tras la reparación y el avance no vuelve a 0 %.
+- P1-5: inspector de revisión rediseñado, ancho arrastrable, evidencia sin texto cortado.
+- P1-6: acceso directo en la barra superior a la sesión en curso o por empezar.
+- Otros: el layout remontaba la página en cada cambio de pestaña; grabaciones que requerían recargar
+  para verse; foto de perfil apuntando a localhost.
+
+Pendiente:
+- Prueba guiada de uso con el psicólogo (P1-6, parte de descubribilidad general).
+- Recuperar las partes ya subidas de una grabación si el navegador se cierra o se cuelga (hoy se
+  descarta al reiniciar).
+- P2 completo. Primer dato: la carga inicial es de 142 KB comprimidos y las rutas se cargan bajo
+  demanda, así que el foco es la sala en vivo (memoria en 50 minutos con 4 GB de RAM).
+- Respaldos automáticos de la base; SpringDoc expuesto en producción (desactivar).
+
