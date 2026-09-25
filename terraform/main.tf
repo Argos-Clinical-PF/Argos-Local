@@ -102,6 +102,11 @@ resource "aws_instance" "app" {
     volume_size = 30
     volume_type = "gp3"
     encrypted   = true
+    # El disco guarda la base: la política de DLM de abajo lo toma por esta etiqueta.
+    tags = {
+      Name     = "argos-app-raiz"
+      Respaldo = "argos-diario"
+    }
   }
 
   metadata_options {
@@ -120,6 +125,54 @@ resource "aws_instance" "app" {
     ignore_changes = [ami]
   }
 
+}
+
+# Snapshot diario del disco de la instancia (base incluida), 7 días de retención. Corre aunque la
+# instancia esté detenida: el volumen sigue existiendo y el snapshot es incremental.
+resource "aws_iam_role" "dlm" {
+  name = "argos-dlm-respaldos"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "dlm.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "dlm" {
+  role       = aws_iam_role.dlm.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+}
+
+resource "aws_dlm_lifecycle_policy" "respaldo_diario" {
+  description        = "ARGOS snapshot diario del disco con la base"
+  execution_role_arn = aws_iam_role.dlm.arn
+  state              = "ENABLED"
+
+  policy_details {
+    resource_types = ["VOLUME"]
+    target_tags = {
+      Respaldo = "argos-diario"
+    }
+
+    schedule {
+      name      = "diario-7-dias"
+      copy_tags = true
+      tags_to_add = {
+        Proyecto = "argos"
+      }
+      create_rule {
+        interval      = 24
+        interval_unit = "HOURS"
+        times         = ["07:00"]
+      }
+      retain_rule {
+        count = 7
+      }
+    }
+  }
 }
 
 resource "aws_eip" "app" {

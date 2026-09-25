@@ -172,6 +172,47 @@ if [ "$DISPONIBLE_KB" -lt 5242880 ]; then
 fi
 
 docker compose "${COMPOSE_FILES[@]}" --env-file .env pull
+
+# Respaldo lógico de la base: un pg_dump a S3 (backups/, se borra a los 14 días) cada 6 horas
+# mientras la instancia está encendida, y uno justo antes de cada despliegue. Complementa el
+# snapshot diario del disco (DLM), que corre aunque la instancia esté detenida.
+cat > /usr/local/bin/argos-respaldo-base <<EOS
+#!/usr/bin/env bash
+set -euo pipefail
+ENTORNO="$APP_DIR/.env"
+USUARIO=\$(grep -m1 '^POSTGRES_USER=' "\$ENTORNO" | cut -d= -f2-)
+BASE=\$(grep -m1 '^POSTGRES_DB=' "\$ENTORNO" | cut -d= -f2-)
+docker ps --format '{{.Names}}' | grep -qx argos-postgres || { echo "argos-postgres no está corriendo"; exit 0; }
+DESTINO="s3://argos-mvp-operacion-$ACCOUNT_ID/backups/argos-\$(date -u +%Y%m%d-%H%M).dump"
+docker exec argos-postgres pg_dump -U "\$USUARIO" -d "\$BASE" -Fc \\
+  | aws s3 cp - "\$DESTINO" --sse AES256 --region "$REGION" --only-show-errors
+echo "Respaldo subido a \$DESTINO"
+EOS
+chmod 700 /usr/local/bin/argos-respaldo-base
+cat > /etc/systemd/system/argos-respaldo-base.service <<'EOS'
+[Unit]
+Description=ARGOS: pg_dump de la base a S3
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/argos-respaldo-base
+EOS
+cat > /etc/systemd/system/argos-respaldo-base.timer <<'EOS'
+[Unit]
+Description=ARGOS: respaldo de la base cada 6 horas con la instancia encendida
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=6h
+
+[Install]
+WantedBy=timers.target
+EOS
+systemctl daemon-reload
+systemctl enable --now argos-respaldo-base.timer
+/usr/local/bin/argos-respaldo-base || echo "Aviso: el respaldo previo al despliegue falló; se continúa."
 docker logout "$ECR_REGISTRY" >/dev/null
 # En una unica EC2 el reemplazo concurrente puede dejar referencias a contenedores
 # ya eliminados. Down preserva los volumenes y vuelve el release determinista.
