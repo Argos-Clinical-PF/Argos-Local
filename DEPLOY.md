@@ -275,3 +275,23 @@ despreciables al volumen actual. Antes y después de cada demo, confirmar que la
 - Los datos de PostgreSQL persisten en el volumen Docker de la EC2.
 - Las imágenes conservan tags inmutables `sha-*` para volver a una versión.
 - Para rollback, ejecutar `Deploy MVP` indicando los tags `sha-*` previos.
+
+## Pasar a GPU (g6.2xlarge) y volver a CPU
+
+Requiere la cuota "Running On-Demand G and VT instances" en 8 o más (pedida el 25/09/2026). Con GPU,
+la transcripción en vivo usa large-v3-turbo y el pase post-sesión deja de tardar decenas de minutos.
+Precio mientras corre: 0,98 USD/h (CPU: 0,36 USD/h); se sigue deteniendo la instancia al terminar.
+
+1. Detener la instancia y cambiar el tipo con Terraform (plan verificado: cambio en el lugar, la base
+   se conserva):
+   `cd terraform && TF_WORKSPACE=cuenta-nueva terraform apply -var demo_gpu=true`
+2. Encenderla y correr una sola vez, por SSM, `scripts/habilitar-gpu.sh` (driver NVIDIA y runtime de
+   contenedores). Termina mostrando `nvidia-smi`.
+3. `aws ssm put-parameter --name /argos/mvp/demo-gpu --value true --overwrite` (y, si se quiere otro
+   modelo en vivo, `/argos/mvp/whisper-model-gpu`).
+4. Redesplegar el bundle (`deploy.yml`, service=bundle). El overlay `docker-compose.gpu.yml` usa la
+   imagen de transcripción con sufijo `-gpu`.
+
+Para volver a CPU: parámetro `demo-gpu=false`, `terraform apply -var demo_gpu=false` y redesplegar.
+El driver instalado no molesta en una instancia sin GPU.
+
