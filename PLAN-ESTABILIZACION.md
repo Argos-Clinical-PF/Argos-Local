@@ -97,3 +97,31 @@ Pendiente:
   demanda, así que el foco es la sala en vivo (memoria en 50 minutos con 4 GB de RAM).
 - Respaldos automáticos de la base; SpringDoc expuesto en producción (desactivar).
 
+## Transcripción y emociones (25/09/2026)
+
+Transcripción, medido en la EC2 de producción sobre FLEURS es_419 (80 clips, 15,1 min, habla leída),
+con las opciones del refinamiento; registro en Argos-Entrenamiento `models/runs/asr-refinamiento-fleurs-es`:
+
+| Modelo | WER limpio | WER con ruido rosa 10 dB | RTF |
+|---|---|---|---|
+| small (en vivo) | 4,44 % | 4,82 % | 0,21 |
+| medium | 3,16 % | 3,85 % | 0,50 |
+| large-v3-turbo | 2,78 % | 3,00 % | 0,39 |
+
+- Desplegado: el refinamiento post-sesión usa large-v3-turbo con 6 hilos (parámetro
+  `whisper-refinement-model`); en vivo sigue small. Entrenamiento PR #47.
+- Ruido: con 10 dB de ruido small pierde menos de medio punto. Demucs separa música de voz y no es un
+  reductor de ruido para habla; un reductor (p. ej. DeepFilterNet) solo se adopta si mejora el WER
+  sobre audio real de consultorio.
+- Pendiente: medir sobre diálogo real (grabar 3 a 5 sesiones simuladas con consentimiento y su
+  transcripción de referencia); guardar la transcripción por turnos de hablante en vez de ventanas
+  fijas de 8 s (hoy un cambio de hablante dentro de una ventana queda bajo un solo hablante);
+  verificar en una sesión virtual real que el micrófono no duplique la voz del paciente.
+
+Emociones: el equipo ya comparó unos diez modelos faciales (incluido CLIP con LoRA) y ninguno superó
+al desplegado; sobre conversación (MELD) el techo medido es ~0,20–0,24 de UAR. La fusión con voz se
+retiró (ADR-027) porque bajaba el recall de tristeza. No se cambia el modelo sin datos propios. El
+siguiente paso es un set de evaluación de ARGOS: las mismas sesiones simuladas, anotadas por un
+psicólogo; con eso se prueban el descarte de cuadros de mala calidad (pose, desenfoque), la
+calibración por persona y enet-b2.
+
