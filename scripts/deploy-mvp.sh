@@ -54,7 +54,8 @@ if [ "$DEMO_GPU" = "true" ]; then
     exit 1
   fi
   WHISPER_MODEL_VALUE="$(get_parameter_optional whisper-model-gpu)"
-  WHISPER_MODEL_VALUE="${WHISPER_MODEL_VALUE:-medium}"
+  # En GPU large-v3-turbo entra en vivo con margen (en CPU solo small cumple la latencia).
+  WHISPER_MODEL_VALUE="${WHISPER_MODEL_VALUE:-large-v3-turbo}"
   WHISPER_DEVICE_VALUE="cuda"
   WHISPER_COMPUTE_VALUE="float16"
 else

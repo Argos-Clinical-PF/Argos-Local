@@ -2,6 +2,8 @@
 # /argos/mvp/demo-gpu=true. CPU sigue siendo el modo barato por defecto.
 services:
   transcripcion:
+    # Variante con cuBLAS/cuDNN (target production-gpu); la publica la CI de Argos-Entrenamiento.
+    image: ${ECR_REGISTRY}/argos-transcripcion:${TRANSCRIPCION_TAG}-gpu
     gpus: all
     environment:
       NVIDIA_VISIBLE_DEVICES: all

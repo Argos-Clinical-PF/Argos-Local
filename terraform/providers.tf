@@ -44,7 +44,7 @@ variable "demo_gpu" {
 
 variable "gpu_instance_type" {
   description = "Instancia GPU para demos. Requiere cuota EC2 G/VT aprobada."
-  default     = "g5.xlarge"
+  default     = "g6.2xlarge"
 }
 
 variable "domain_name" {
