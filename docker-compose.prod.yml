@@ -128,6 +128,8 @@ services:
       ANTHROPIC_TOPICS_MODEL: ${ANTHROPIC_TOPICS_MODEL:-claude-haiku-4-5-20251001}
       IA_PROVEEDOR: ${IA_PROVEEDOR:-ANTHROPIC}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      # El backend no arranca si ENCRYPTION_KEY o JWT_SECRET faltan o tienen el valor de desarrollo.
+      ARGOS_EXIGIR_SECRETOS: "true"
       RECORDINGS_ENABLED: "true"
       RECORDINGS_BUCKET: ${RECORDINGS_BUCKET}
       RECORDINGS_KMS_KEY_ID: ${RECORDINGS_KMS_KEY_ID:-alias/aws/s3}
