@@ -89,13 +89,50 @@ Hecho y desplegado (Frontend PR #125, Backend PR #83):
 - Otros: el layout remontaba la página en cada cambio de pestaña; grabaciones que requerían recargar
   para verse; foto de perfil apuntando a localhost.
 
-Pendiente:
+Pendiente al 25/09 (tarde), resuelto esa noche salvo lo indicado en "Sigue pendiente":
 - Prueba guiada de uso con el psicólogo (P1-6, parte de descubribilidad general).
-- Recuperar las partes ya subidas de una grabación si el navegador se cierra o se cuelga (hoy se
-  descarta al reiniciar).
-- P2 completo. Primer dato: la carga inicial es de 142 KB comprimidos y las rutas se cargan bajo
-  demanda, así que el foco es la sala en vivo (memoria en 50 minutos con 4 GB de RAM).
-- Respaldos automáticos de la base; SpringDoc expuesto en producción (desactivar).
+- Recuperar las partes ya subidas de una grabación si el navegador se cierra o se cuelga.
+- P2 completo.
+- Respaldos automáticos de la base; SpringDoc expuesto en producción.
+
+## Estado al 25/09/2026 (noche)
+
+Hecho y desplegado (Frontend #128 a #130, Backend #84 y #85, Local #78):
+- Grabaciones recuperables. Si el navegador se cierra, se cuelga o se corta la luz, el job de
+  retención completa la carga con las partes que ya están en S3 (ListParts, racha continua desde
+  la parte 1): a los 30 minutos de cerrada la sesión, a los 5 minutos de reabrir la sala o a las
+  6 horas si la sesión nunca se cerró. No se recupera con la sesión cancelada, sin consentimiento
+  de retención o con el plazo consentido vencido; se conserva ese plazo. La interfaz la marca
+  "Parcial recuperada". Un WebM de MediaRecorder cortado se reproduce y permite buscar en Chrome.
+  Una carga abandonada por una parte que no subió también conserva lo anterior.
+- Cortes de red: cada parte reintenta unos 50 s (antes 7 s). Prueba e2e: 20 s sin red y una
+  recarga en plena sesión; la sala se recupera sola y la transcripción sigue.
+- Secretos: con ARGOS_EXIGIR_SECRETOS=true el backend no arranca si ENCRYPTION_KEY o JWT_SECRET
+  faltan o tienen el valor de desarrollo (con la clave vacía el cifrado se desactivaba sin aviso).
+- Ingreso más rápido: el código de Inicio se baja mientras se escribe la contraseña y sus cuatro
+  consultas salen en paralelo apenas responde el login (una ida y vuelta en vez de tres).
+- Despliegues: index.html sin caché y recarga automática si una pestaña pide un trozo que ya no
+  existe; el log de nginx registra rt (total) y urt (backend) por pedido para medir el p95.
+- Ingreso rediseñado (lente 3D de la marca) y Back Office con nombres accesibles en cada campo.
+
+P2 medido (sala en vivo sobre la API simulada, Chrome con cámara y micrófono falsos):
+- 50 minutos con la CPU frenada x6: sin cortes ni remontajes, 406 renovaciones del login,
+  52 partes de grabación subidas. Salen 736 de 750 fragmentos: cada fragmento es un
+  MediaRecorder nuevo y el relevo suma unos 76 ms por ciclo con esa CPU. Es deriva de cadencia;
+  el texto final no se ve afectado porque el refinamiento usa la grabación continua.
+- 20 minutos con recolección de basura forzada antes de cada muestra: memoria retenida estable
+  en unos 24 MB (mín. 18, máx. 26). Sin fuga; la curva que subía sin forzar era basura pendiente.
+- Carga inicial: ~113 KB en la primera visita (antes ~741 KB con el logo en PNG).
+
+Sigue pendiente:
+- Prueba guiada de uso con el psicólogo.
+- k6 contra producción (capacidad y p95 de la API): necesita una cuenta de prueba. Mientras
+  tanto el p95 real sale de `docker logs argos-frontend` (rt= y urt=).
+- Tiempo de procesamiento post-sesión sobre una sesión real de 50 minutos.
+- Decisiones abiertas: "Volver a la agenda" en plena sesión borra la grabación sin confirmar
+  (igual que el fin de pantalla compartida o la pérdida de la cámara); lo no subido al caerse el
+  navegador se pierde (hasta una parte de 5 MiB: unos 5 minutos de solo audio, 85 s de video),
+  y guardarlo en el navegador choca con la política de no persistir datos de sesión (ARGOS-156).
 
 ## Transcripción y emociones (25/09/2026)
 
