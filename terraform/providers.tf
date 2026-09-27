@@ -1,6 +1,15 @@
 terraform {
-  required_version = ">= 1.5"
-  backend "local" {}
+  # use_lockfile (bloqueo nativo de S3, sin DynamoDB) existe desde 1.11.
+  required_version = ">= 1.11"
+  # Estado compartido: el bucket se crea una sola vez a mano, fuera de este estado (ver «Estado de
+  # Terraform» en DEPLOY.md). El workspace cuenta-nueva queda en env:/cuenta-nueva/<key>.
+  backend "s3" {
+    bucket       = "argos-terraform-estado-616322963974"
+    key          = "argos/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
   required_providers {
     aws = {
       source  = "hashicorp/aws"

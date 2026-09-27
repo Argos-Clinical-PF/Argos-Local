@@ -3,12 +3,41 @@ set -euo pipefail
 
 REGION="${AWS_REGION:-us-east-1}"
 PARAM_PREFIX="/argos/mvp"
-APP_DIR="/home/ec2-user/argos"
+APP_DIR="${APP_DIR:-/home/ec2-user/argos}"
 
 : "${BACKEND_TAG:?BACKEND_TAG es obligatorio}"
 : "${FRONTEND_TAG:?FRONTEND_TAG es obligatorio}"
 : "${TRANSCRIPCION_TAG:?TRANSCRIPCION_TAG es obligatorio}"
 : "${EMOCIONES_TAG:?EMOCIONES_TAG es obligatorio}"
+
+# Un deploy reinicia contenedores: con una sesión en vivo corta la transcripción y puede hacer
+# perder partes de la grabación. Se consulta el mismo gate que usa el apagado de la EC2 antes de
+# tocar nada. Si el backend no responde, no hay sesión en vivo que proteger y se sigue.
+# Sale con 75 para que el workflow distinga "bloqueado" de "falló" y no revierta ni apague.
+if [ "${FORZAR_DESPLIEGUE:-false}" != "true" ] \
+  && [ "$(docker inspect -f '{{.State.Running}}' argos-backend 2>/dev/null)" = "true" ]; then
+  if SEGURIDAD="$(docker exec argos-backend wget -qO- -T 10 http://localhost:8080/api/health/deployment-safety 2>/dev/null)"; then
+    if ! grep -q '"seguro":true' <<<"$SEGURIDAD"; then
+      echo "Despliegue cancelado: hay trabajo clínico activo (sesiones, cargas o jobs post-sesión)."
+      echo "$SEGURIDAD"
+      echo "Reintentar cuando termine, o relanzar Release MVP con forzar=true."
+      exit 75
+    fi
+  else
+    echo "Aviso: el backend no respondió deployment-safety; se despliega igual."
+  fi
+fi
+
+# El workflow deja el bundle nuevo en entrante/ y recién acá, pasado el gate, reemplaza los archivos
+# de la app: un deploy cancelado no deja un Caddyfile o un compose sin desplegar que el próximo
+# arranque del gateway o un restaurar-respaldo.sh tomarían con el .env viejo.
+ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$ORIGEN" != "$APP_DIR" ]; then
+  mkdir -p "$APP_DIR"
+  cp "$ORIGEN"/docker-compose.prod.yml "$ORIGEN"/Caddyfile "$ORIGEN"/deploy-mvp.sh "$ORIGEN"/refresh-ip-certificate.sh "$APP_DIR"/
+  cp "$ORIGEN"/docker-compose.gpu.yml "$APP_DIR"/ 2>/dev/null || true
+  chmod 700 "$APP_DIR"/deploy-mvp.sh "$APP_DIR"/refresh-ip-certificate.sh
+fi
 
 get_parameter() {
   aws ssm get-parameter \
@@ -137,8 +166,9 @@ umask 077
   printf 'PROCESSING_AUDIO_ENABLED=true\n'
   printf 'PROCESSING_AUDIO_MAX_RETENTION_HOURS=2\n'
   printf 'PROCESSING_AUDIO_MAX_BYTES=134217728\n'
-  printf 'TRANSCRIPCION_REALTIME_TIMEOUT_SECONDS=20\n'
-  printf 'TRANSCRIPCION_REALTIME_RETRIES=3\n'
+  # CloudFront corta a los 60 s: 3 intentos de 15 s + 1 s + 2 s de espera = 48 s en el peor caso.
+  printf 'TRANSCRIPCION_REALTIME_TIMEOUT_SECONDS=15\n'
+  printf 'TRANSCRIPCION_REALTIME_RETRIES=2\n'
   printf 'TRANSCRIPCION_REALTIME_BACKOFF_MS=1000\n'
   printf 'TRANSCRIPCION_REFINEMENT_TIMEOUT_MINUTES=120\n'
   printf 'EMOCIONES_REQUIRE_FACE_TRACKING=true\n'
@@ -152,6 +182,7 @@ umask 077
   # instancia no sobrevive al siguiente.
   printf 'ARGOS_DIARIZACION_ENABLED=%s\n' "$DIARIZACION_ENABLED"
   printf 'ARGOS_ESPERA_ASIGNACION_HORAS=%s\n' "$ESPERA_ASIGNACION_HORAS"
+  printf 'CADDYFILE_SHA256=%s\n' "$(sha256sum Caddyfile | cut -d' ' -f1)"
 } > .env
 
 COMPOSE_FILES=(-f docker-compose.prod.yml)
@@ -176,6 +207,7 @@ docker compose "${COMPOSE_FILES[@]}" --env-file .env pull
 # Respaldo lógico de la base: un pg_dump a S3 (backups/, se borra a los 14 días) cada 6 horas
 # mientras la instancia está encendida, y uno justo antes de cada despliegue. Complementa el
 # snapshot diario del disco (DLM), que corre aunque la instancia esté detenida.
+# Las fotos de perfil viven en un volumen, no en la base: van en el mismo respaldo como tar.
 cat > /usr/local/bin/argos-respaldo-base <<EOS
 #!/usr/bin/env bash
 set -euo pipefail
@@ -183,10 +215,17 @@ ENTORNO="$APP_DIR/.env"
 USUARIO=\$(grep -m1 '^POSTGRES_USER=' "\$ENTORNO" | cut -d= -f2-)
 BASE=\$(grep -m1 '^POSTGRES_DB=' "\$ENTORNO" | cut -d= -f2-)
 docker ps --format '{{.Names}}' | grep -qx argos-postgres || { echo "argos-postgres no está corriendo"; exit 0; }
-DESTINO="s3://argos-mvp-operacion-$ACCOUNT_ID/backups/argos-\$(date -u +%Y%m%d-%H%M).dump"
+MARCA=\$(date -u +%Y%m%d-%H%M)
+DESTINO="s3://argos-mvp-operacion-$ACCOUNT_ID/backups/argos-\$MARCA.dump"
 docker exec argos-postgres pg_dump -U "\$USUARIO" -d "\$BASE" -Fc \\
   | aws s3 cp - "\$DESTINO" --sse AES256 --region "$REGION" --only-show-errors
 echo "Respaldo subido a \$DESTINO"
+if docker inspect argos-backend >/dev/null 2>&1; then
+  FOTOS="s3://argos-mvp-operacion-$ACCOUNT_ID/backups/perfiles-\$MARCA.tar"
+  docker cp argos-backend:/app/uploads/perfiles - \\
+    | aws s3 cp - "\$FOTOS" --sse AES256 --region "$REGION" --only-show-errors
+  echo "Fotos de perfil subidas a \$FOTOS"
+fi
 EOS
 chmod 700 /usr/local/bin/argos-respaldo-base
 cat > /etc/systemd/system/argos-respaldo-base.service <<'EOS'
@@ -210,15 +249,75 @@ OnUnitActiveSec=6h
 [Install]
 WantedBy=timers.target
 EOS
+# Vigía: Docker reinicia un contenedor solo si el proceso termina. Uno colgado (JVM sin memoria,
+# Whisper trabado) queda "unhealthy" para siempre. Cada minuto se cuenta cuántos chequeos seguidos
+# lleva así cada contenedor y al tercero se reinicia. Queda en `journalctl -u argos-vigia`.
+cat > /usr/local/bin/argos-vigia <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+CUENTAS=/run/argos-vigia
+mkdir -p "$CUENTAS"
+INSALUBRES="$(docker ps --filter health=unhealthy --filter name=argos- --format '{{.Names}}')"
+for archivo in "$CUENTAS"/*; do
+  [ -e "$archivo" ] || continue
+  grep -qx "$(basename "$archivo")" <<<"$INSALUBRES" || rm -f "$archivo"
+done
+for nombre in $INSALUBRES; do
+  cuenta=$(( $(cat "$CUENTAS/$nombre" 2>/dev/null || echo 0) + 1 ))
+  if [ "$cuenta" -lt 3 ]; then
+    echo "$cuenta" > "$CUENTAS/$nombre"
+    echo "$nombre unhealthy ($cuenta/3)"
+    continue
+  fi
+  ULTIMO="$(docker inspect -f '{{with .State.Health}}{{range .Log}}{{.Output}}{{end}}{{end}}' "$nombre" | tail -c 300)"
+  echo "$nombre lleva 3 chequeos seguidos unhealthy; se reinicia. Último healthcheck: $ULTIMO"
+  docker restart --time 30 "$nombre" >/dev/null
+  rm -f "$CUENTAS/$nombre"
+done
+EOS
+chmod 700 /usr/local/bin/argos-vigia
+cat > /etc/systemd/system/argos-vigia.service <<'EOS'
+[Unit]
+Description=ARGOS: reinicia contenedores unhealthy
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/argos-vigia
+EOS
+cat > /etc/systemd/system/argos-vigia.timer <<'EOS'
+[Unit]
+Description=ARGOS: vigía de contenedores cada minuto
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+EOS
 systemctl daemon-reload
-systemctl enable --now argos-respaldo-base.timer
+systemctl enable --now argos-respaldo-base.timer argos-vigia.timer
 /usr/local/bin/argos-respaldo-base || echo "Aviso: el respaldo previo al despliegue falló; se continúa."
 docker logout "$ECR_REGISTRY" >/dev/null
-# En una unica EC2 el reemplazo concurrente puede dejar referencias a contenedores
-# ya eliminados. Down preserva los volumenes y vuelve el release determinista.
-docker compose "${COMPOSE_FILES[@]}" --env-file .env down --remove-orphans --timeout 30
-PUBLIC_IP="$PUBLIC_IP" "$APP_DIR/refresh-ip-certificate.sh" --certificate-only
+# Sin `down`: compose recrea solo los servicios cuya imagen o configuración cambió, así que un
+# release del frontend no reinicia Postgres ni los modelos. El hash del Caddyfile va como label
+# del gateway para que un cambio de ese archivo también lo recree. Si vuelve a aparecer el error
+# de referencias a contenedores ya eliminados que motivó el `down`, usar --force-recreate acotado
+# al servicio afectado, no el stack entero.
 docker compose "${COMPOSE_FILES[@]}" --env-file .env up -d --remove-orphans
+# certbot necesita el puerto 80, así que renovar el certificado de la IP detiene el gateway unos
+# segundos: solo se hace si vence en menos de 3 días. Ese certificado sirve únicamente al acceso
+# directo por IP (CloudFront entra por origin.<dominio>), así que un fallo no tumba el release.
+CERTIFICADO_IP="$APP_DIR/certbot/live/$PUBLIC_IP/fullchain.pem"
+if [ -f "$CERTIFICADO_IP" ] && openssl x509 -checkend 259200 -noout -in "$CERTIFICADO_IP" >/dev/null 2>&1; then
+  echo "El certificado de la IP vence en más de 3 días; el gateway sigue sin cortes."
+else
+  PUBLIC_IP="$PUBLIC_IP" "$APP_DIR/refresh-ip-certificate.sh" \
+    || echo "Aviso: no se pudo renovar el certificado de la IP; se continúa."
+fi
 docker image prune -f || true
 
 for intento in $(seq 1 72); do
