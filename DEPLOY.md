@@ -107,9 +107,29 @@ jwt-secret
 mail-username
 mail-password
 whisper-model
+secreto-origen-cloudfront
 ```
 
 Nunca guardar estos valores en GitHub, archivos versionados ni salidas de CI.
+
+### Secreto de origen de CloudFront
+
+El backend limita el login, la recuperación de contraseña y los reportes de error por la IP real del
+visitante, que CloudFront informa en `CloudFront-Viewer-Address`. Como el origen también es alcanzable
+directo por 443, ese header solo se acepta si la request trae `X-Argos-Origen` con el secreto que
+agrega CloudFront; si no, se limita por la IP de la conexión.
+
+Orden para activarlo (o rotarlo), porque un backend con el secreto y un CloudFront sin él haría que
+todos los usuarios de un mismo borde compartan un único límite:
+
+1. Crear el parámetro, solo hexadecimal para que no haya que escapar nada en el `.env`:
+   `aws ssm put-parameter --profile argos-nuevos --region us-east-1 --name /argos/mvp/secreto-origen-cloudfront --type SecureString --value "$(openssl rand -hex 32)"` (para rotar, `--overwrite`).
+2. `terraform plan` y `terraform apply`: la distribución se actualiza en el lugar y agrega el header al
+   origen `argos-ec2-origin`. Esperar a que quede `Deployed`.
+3. Recién entonces desplegar (Release MVP): `deploy-mvp.sh` escribe `ARGOS_SECRETO_CLOUDFRONT` en el `.env`.
+
+Sin el parámetro, el deploy deja el secreto vacío y el backend confía siempre en `CloudFront-Viewer-Address`
+(como antes); el `terraform plan` falla hasta crear el parámetro del paso 1.
 
 ## Automatización
 

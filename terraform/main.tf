@@ -24,6 +24,12 @@ data "aws_ami" "al2023" {
   }
 }
 
+# Secreto que CloudFront agrega a cada request al origen: con él el backend confía en
+# CloudFront-Viewer-Address para limitar por la IP real del visitante (ver DEPLOY.md, «Secreto de origen»).
+data "aws_ssm_parameter" "secreto_origen_cloudfront" {
+  name = "/argos/mvp/secreto-origen-cloudfront"
+}
+
 data "aws_ssm_parameter" "dlami_gpu_al2023" {
   name = "/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-amazon-linux-2023/latest/ami-id"
 }
@@ -455,6 +461,11 @@ resource "aws_cloudfront_distribution" "app" {
     # API responde 504 en el mismo tiempo, en vez de 3 intentos de 10 s.
     connection_attempts = 1
     connection_timeout  = 5
+
+    custom_header {
+      name  = "X-Argos-Origen"
+      value = data.aws_ssm_parameter.secreto_origen_cloudfront.value
+    }
 
     custom_origin_config {
       http_port              = 80

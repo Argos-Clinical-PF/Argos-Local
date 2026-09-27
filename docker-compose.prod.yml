@@ -128,7 +128,12 @@ services:
       MAIL_SMTP_AUTH: "true"
       MAIL_SMTP_STARTTLS_ENABLE: "true"
       LOGIN_MAX_FAILED_ATTEMPTS: "5"
-      LOGIN_LOCK_MINUTES: "15"
+      # Corto a propósito: el límite por IP es la defensa principal; un bloqueo largo por cuenta
+      # permitiría dejar afuera a un profesional sabiendo solo su email.
+      LOGIN_LOCK_MINUTES: "5"
+      # Con este secreto el backend confía en CloudFront-Viewer-Address solo si la request trae
+      # el header que agrega CloudFront (ver DEPLOY.md, «Secreto de origen»).
+      ARGOS_SECRETO_CLOUDFRONT: ${ARGOS_SECRETO_CLOUDFRONT:-}
       # Back Office: sin estas dos variables, el seed del primer ADMIN_PLATAFORMA no se ejecuta
       # (nunca hay credenciales por defecto conocidas). Ver Argos-Backend AdminSeedRunner.
       ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}

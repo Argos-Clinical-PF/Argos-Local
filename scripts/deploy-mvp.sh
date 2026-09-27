@@ -119,6 +119,7 @@ umask 077
   printf 'POSTGRES_USER=argos_app\n'
   printf 'POSTGRES_PASSWORD=%s\n' "$(get_parameter postgres-password)"
   printf 'JWT_SECRET=%s\n' "$(get_parameter jwt-secret)"
+  printf 'ARGOS_SECRETO_CLOUDFRONT=%s\n' "$(get_parameter_optional secreto-origen-cloudfront)"
   printf 'MAIL_USERNAME=%s\n' "$(get_parameter mail-username)"
   printf 'MAIL_PASSWORD=%s\n' "$(get_parameter mail-password)"
   printf 'MAIL_FROM=%s\n' "$(get_parameter mail-username)"
