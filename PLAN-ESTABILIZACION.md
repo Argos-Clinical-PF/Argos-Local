@@ -127,7 +127,8 @@ P2 medido (sala en vivo sobre la API simulada, Chrome con cámara y micrófono f
 Sigue pendiente:
 - Prueba guiada de uso con el psicólogo.
 - k6 contra producción (capacidad y p95 de la API): necesita una cuenta de prueba. Mientras
-  tanto el p95 real sale de `docker logs argos-frontend` (rt= y urt=).
+  tanto el p95 real sale de rt= y urt= del stream `argos-frontend` en CloudWatch (consulta en
+  DEPLOY.md, «Logs»; 14 días, sobrevive a los deploys).
 - Tiempo de procesamiento post-sesión sobre una sesión real de 50 minutos.
 - Decisiones abiertas: "Volver a la agenda" en plena sesión borra la grabación sin confirmar
   (igual que el fin de pantalla compartida o la pérdida de la cámara); lo no subido al caerse el

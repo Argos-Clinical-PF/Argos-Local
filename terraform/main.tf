@@ -210,6 +210,10 @@ data "aws_cloudfront_cache_policy" "sin_cache" {
   name = "Managed-CachingDisabled"
 }
 
+data "aws_cloudfront_cache_policy" "optimizada" {
+  name = "Managed-CachingOptimized"
+}
+
 data "aws_cloudfront_origin_request_policy" "todos_sin_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
@@ -384,6 +388,57 @@ resource "aws_cloudfront_function" "redirigir_www" {
   code    = file("${path.module}/functions/redirigir-www.js")
 }
 
+# Página "ARGOS está en pausa": la EC2 pasa la mayor parte del tiempo detenida, y sin esto el
+# dominio colgaba 30 s y terminaba en el 504 en inglés de CloudFront. El bucket es público a
+# propósito y solo contiene esa página: el endpoint de sitio web de S3 (el único que devuelve un
+# documento de error para cualquier ruta) no admite acceso privado desde CloudFront.
+resource "aws_s3_bucket" "pausa" {
+  bucket        = "argos-mvp-pausa-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_public_access_block" "pausa" {
+  bucket                  = aws_s3_bucket.pausa.id
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_policy" "pausa" {
+  bucket = aws_s3_bucket.pausa.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "LecturaPublicaDeLaPaginaDePausa"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.pausa.arn}/*"
+    }]
+  })
+  depends_on = [aws_s3_bucket_public_access_block.pausa]
+}
+
+resource "aws_s3_bucket_website_configuration" "pausa" {
+  bucket = aws_s3_bucket.pausa.id
+  index_document {
+    suffix = "index.html"
+  }
+  error_document {
+    key = "index.html"
+  }
+}
+
+resource "aws_s3_object" "pausa" {
+  bucket        = aws_s3_bucket.pausa.id
+  key           = "index.html"
+  source        = "${path.module}/pausa/index.html"
+  etag          = filemd5("${path.module}/pausa/index.html")
+  content_type  = "text/html; charset=utf-8"
+  cache_control = "no-store"
+}
+
 resource "aws_cloudfront_distribution" "app" {
   enabled             = true
   is_ipv6_enabled     = true
@@ -396,29 +451,96 @@ resource "aws_cloudfront_distribution" "app" {
   origin {
     domain_name = aws_route53_record.origin.fqdn
     origin_id   = "argos-ec2-origin"
+    # Un intento de 5 s: con la EC2 detenida la navegación cae a la página de pausa en ~5 s y la
+    # API responde 504 en el mismo tiempo, en vez de 3 intentos de 10 s.
+    connection_attempts = 1
+    connection_timeout  = 5
 
     custom_origin_config {
       http_port              = 80
       https_port             = 443
       origin_protocol_policy = "https-only"
-      origin_read_timeout    = 60
+      # Tope de CloudFront sin pedir cuota: todo lo síncrono del backend debe responder antes
+      # (ver «Timeouts» en DEPLOY.md).
+      origin_read_timeout  = 60
+      origin_ssl_protocols = ["TLSv1.2"]
+    }
+  }
+
+  origin {
+    domain_name = aws_s3_bucket_website_configuration.pausa.website_endpoint
+    origin_id   = "argos-pausa"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
 
+  origin_group {
+    origin_id = "argos-ec2-o-pausa"
+    failover_criteria {
+      status_codes = [500, 502, 503, 504]
+    }
+    member {
+      origin_id = "argos-ec2-origin"
+    }
+    member {
+      origin_id = "argos-pausa"
+    }
+  }
+
+  # Navegación (HTML de la SPA): si la EC2 no contesta, la página de pausa. Un origin group solo
+  # admite GET/HEAD/OPTIONS, así que todo lo que escribe va por los comportamientos de abajo. Sin
+  # política de origen: nginx sirve estáticos y no necesita cookies ni query string, y así los
+  # tokens de los links de contraseña no viajan al bucket de pausa, que se alcanza por HTTP.
   default_cache_behavior {
-    target_origin_id         = "argos-ec2-origin"
-    viewer_protocol_policy   = "redirect-to-https"
-    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods           = ["GET", "HEAD"]
-    compress                 = true
-    cache_policy_id          = data.aws_cloudfront_cache_policy.sin_cache.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.todos_sin_host.id
+    target_origin_id       = "argos-ec2-o-pausa"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    cache_policy_id        = data.aws_cloudfront_cache_policy.sin_cache.id
 
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.redirigir_www.arn
     }
+  }
+
+  # La API va directo a la EC2 y sin caché: sus 502/504 en JSON (IA_ERROR, IA_TIMEOUT) y sus 404
+  # llegan tal cual al frontend, nunca reemplazados por la página de pausa.
+  dynamic "ordered_cache_behavior" {
+    for_each = ["/api/*", "/public/*"]
+    content {
+      path_pattern             = ordered_cache_behavior.value
+      target_origin_id         = "argos-ec2-origin"
+      viewer_protocol_policy   = "redirect-to-https"
+      allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods           = ["GET", "HEAD"]
+      compress                 = true
+      cache_policy_id          = data.aws_cloudfront_cache_policy.sin_cache.id
+      origin_request_policy_id = data.aws_cloudfront_origin_request_policy.todos_sin_host.id
+
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.redirigir_www.arn
+      }
+    }
+  }
+
+  # Los assets llevan hash en el nombre y nginx ya los marca immutable: se sirven desde el borde
+  # más cercano en vez de ir a us-east-1 en cada visita. El HTML sigue sin caché.
+  ordered_cache_behavior {
+    path_pattern           = "/assets/*"
+    target_origin_id       = "argos-ec2-origin"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    cache_policy_id        = data.aws_cloudfront_cache_policy.optimizada.id
   }
 
   restrictions {
@@ -724,6 +846,14 @@ resource "aws_scheduler_schedule" "eliminar_grabaciones" {
   }
 }
 
+# Logs de los contenedores (driver awslogs de docker-compose.prod.yml). Antes vivían solo en el
+# disco y cada deploy los borraba al recrear los contenedores. 14 días alcanzan para investigar un
+# incidente entre dos demos sin acumular costo.
+resource "aws_cloudwatch_log_group" "mvp" {
+  name              = "/argos/mvp"
+  retention_in_days = 14
+}
+
 resource "aws_iam_role_policy" "ec2_operacion" {
   name = "argos-ec2-operacion"
   role = aws_iam_role.ec2.id
@@ -738,6 +868,11 @@ resource "aws_iam_role_policy" "ec2_operacion" {
           "ssm:GetParametersByPath"
         ]
         Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/argos/mvp/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.mvp.arn}:*"
       },
       {
         Effect = "Allow"

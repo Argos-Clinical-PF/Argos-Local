@@ -30,22 +30,71 @@ reales hasta completar la revisión integral de privacidad y seguridad.
 
 ## Infraestructura
 
-Desde `Argos-Local/terraform`:
+Desde `Argos-Local/terraform`, con un perfil de la cuenta 616322963974:
 
 ```bash
-export AWS_PROFILE=argos-<tu-nombre>   # cada integrante tiene el suyo
+export AWS_PROFILE=argos-nuevos   # o el perfil propio de esa cuenta
 terraform init
+terraform workspace select cuenta-nueva
 terraform plan
 terraform apply
 terraform output
 ```
 
-El nombre del perfil **no se hardcodea**: cada integrante configura el suyo y lo declara con
-`AWS_PROFILE`. Si falla con `Unable to locate credentials`, listar los disponibles con
+Si falla con `Unable to locate credentials`, listar los perfiles disponibles con
 `aws configure list-profiles`.
 
-Terraform administra EC2/EIP, ECR, S3 operativo, SSM, IAM y el rol
-OIDC `argos-github-actions`.
+Terraform administra EC2/EIP, ECR, S3 operativo, SSM, IAM, CloudFront, la página de pausa, el
+grupo de logs y el rol OIDC `argos-github-actions`.
+
+### Estado de Terraform
+
+El estado vive en S3, en `argos-terraform-estado-616322963974` (versionado y cifrado), con bloqueo
+nativo de S3 (`use_lockfile`, Terraform 1.11 o posterior): todos ven el mismo estado y dos `apply`
+simultáneos no se pisan. El workspace de la cuenta es `cuenta-nueva` (clave
+`env:/cuenta-nueva/argos/terraform.tfstate`). El bucket se crea a mano, fuera de este estado, para
+que Terraform no administre el lugar donde se guarda a sí mismo.
+
+Migración desde el estado local (una sola vez, desde la máquina que tiene
+`terraform/terraform.tfstate.d/cuenta-nueva/`):
+
+1. Crear el bucket:
+
+   ```bash
+   export AWS_PROFILE=argos-nuevos
+   BUCKET=argos-terraform-estado-616322963974
+   aws s3api create-bucket --bucket "$BUCKET" --region us-east-1
+   aws s3api put-bucket-versioning --bucket "$BUCKET" \
+     --versioning-configuration Status=Enabled
+   aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration \
+     '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
+   aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration \
+     BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+   aws s3api put-bucket-policy --bucket "$BUCKET" --policy "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"DenyInsecureTransport\",\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"s3:*\",\"Resource\":[\"arn:aws:s3:::$BUCKET\",\"arn:aws:s3:::$BUCKET/*\"],\"Condition\":{\"Bool\":{\"aws:SecureTransport\":\"false\"}}}]}"
+   ```
+
+2. Respaldar el estado local y sacar del medio el workspace `default`, que es de la cuenta vieja
+   (915093573341) y no debe terminar en el bucket de la nueva:
+
+   ```bash
+   cd terraform
+   RESPALDO=~/argos-tfstate-respaldo-$(date +%Y%m%d)
+   mkdir -p "$RESPALDO"
+   cp -R terraform.tfstate.d "$RESPALDO"/
+   mv terraform.tfstate terraform.tfstate.*backup "$RESPALDO"/
+   ```
+
+3. Migrar (responder `yes` a copiar los workspaces a `s3`):
+
+   ```bash
+   terraform init -migrate-state
+   terraform workspace select cuenta-nueva
+   terraform plan    # solo los cambios pendientes del código, nunca "48 to add"
+   aws s3 ls "s3://$BUCKET" --recursive
+   ```
+
+4. Con el plan correcto, sacar el estado local del repositorio para que nadie lo use por error:
+   `mv terraform.tfstate.d "$RESPALDO"/terraform.tfstate.d-migrado`.
 
 ## Parámetros SSM
 
@@ -233,7 +282,7 @@ tags deseados y si la EC2 debe detenerse después de validar.
 ## La EC2 se detiene sola después de cada release
 
 El workflow reutilizable de deploy apaga la instancia al terminar, incluso cuando el despliegue
-falla. Es deliberado —fuera de demos la EC2 no debe quedar encendida— pero tiene un efecto que
+falla (salvo cuando el gate de trabajo clínico lo canceló: ahí hay alguien usándola). Es deliberado —fuera de demos la EC2 no debe quedar encendida— pero tiene un efecto que
 sorprende: **cada merge a `main` deja el sitio abajo** hasta que alguien lo vuelve a levantar.
 
 Durante un período de demo eso es justamente lo que no se quiere. La variable de repositorio
@@ -270,11 +319,183 @@ costo fijo de ALB. CloudFront no tiene cargo fijo pero sí por request y transfe
 despreciables al volumen actual. Antes y después de cada demo, confirmar que la instancia
 `argos-app` esté en estado `stopped`.
 
-## Recuperación
+## Cómo se aplica un release
 
-- Los datos de PostgreSQL persisten en el volumen Docker de la EC2.
-- Las imágenes conservan tags inmutables `sha-*` para volver a una versión.
-- Para rollback, ejecutar `Deploy MVP` indicando los tags `sha-*` previos.
+`deploy-mvp.sh` corre en la instancia por SSM y hace, en orden:
+
+1. **Gate de trabajo clínico.** Si `argos-backend` está corriendo, consulta
+   `/api/health/deployment-safety` (sesiones `EN_CURSO` o `FINALIZANDO`, jobs post-sesión, audios
+   y cargas pendientes). Si no es seguro, sale con código 75 sin tocar nada: el run falla con
+   «Deploy cancelado», no revierte y no apaga la instancia. Reintentar cuando termine, o relanzar
+   `Release MVP` a mano con `forzar=true` sabiendo que corta la sesión en vivo. Si el backend no
+   responde, no hay sesión que proteger y sigue. Si el workflow tuvo que encender la EC2, el gate se
+   omite: recién encendida no puede haber una sesión en vivo. Una sesión que quedó `EN_CURSO`
+   porque nadie la finalizó también bloquea: finalizarla desde la app o usar `forzar=true`.
+2. Regenera el `.env`, baja las imágenes, toma un respaldo (dump y fotos) e instala los timers.
+3. `docker compose up -d --remove-orphans`, sin `down`: solo se recrean los servicios cuya imagen o
+   configuración cambió, así que un release del frontend reinicia solo nginx y no Postgres ni los
+   modelos. El hash del `Caddyfile` va como label del gateway para que un cambio de ese archivo
+   también lo recree.
+4. Renueva el certificado de la IP solo si vence en menos de 3 días (certbot detiene el gateway
+   unos segundos).
+
+### Rollback automático
+
+Si el comando de deploy o el smoke test fallan, el workflow vuelve solo al último manifiesto
+promovido (`deploy/manifests/current.json`, que no cambió) con el bundle de ese release, repite el
+smoke test y el run termina igual en rojo. El resumen del run dice a qué release volvió. No revierte
+cuando el gate canceló el deploy (no cambió nada), cuando la acción era un `rollback` manual, ni
+cuando el comando SSM seguía corriendo. Los bundles de `deploy/` se borran a los 30 días: si el
+último release promovido es más viejo, el run lo avisa y hay que usar `action: rollback` a mano
+(vuelve a `previous.json`) o desplegar tags `sha-*` conocidos.
+
+## Logs
+
+Los contenedores escriben en CloudWatch Logs, grupo `/argos/mvp`, un stream por contenedor
+(`argos-backend`, `argos-frontend`, ...), con 14 días de retención. Sobreviven a los deploys y al
+apagado. `docker logs` sigue funcionando en la instancia, pero solo desde la última vez que se
+recreó el contenedor. El driver está en modo `non-blocking`: si CloudWatch no responde se descartan
+líneas, la aplicación no se frena.
+
+```bash
+aws logs tail /argos/mvp --log-stream-names argos-backend --since 2h --follow
+```
+
+p95 de la API en CloudWatch Logs Insights (grupo `/argos/mvp`), sobre el formato `argos` de nginx:
+
+```text
+filter @logStream = "argos-frontend" and @message like /"(GET|POST|PUT|PATCH|DELETE) \/api\//
+| parse @message "rt=* urt=*" as rt, urt
+| stats pct(rt, 95) as p95_total, pct(urt, 95) as p95_backend, count(*) as pedidos by bin(1h)
+```
+
+## Vigía de contenedores
+
+Docker reinicia un contenedor solo cuando su proceso termina: uno colgado (JVM sin memoria, Whisper
+trabado) queda `unhealthy` indefinidamente. `deploy-mvp.sh` instala `argos-vigia.timer`, que cada
+minuto cuenta los chequeos seguidos en que cada contenedor `argos-*` figura `unhealthy` y al tercero
+lo reinicia, dejando el último resultado del healthcheck en el journal:
+
+```bash
+journalctl -u argos-vigia --since today
+```
+
+No manda alertas por mail ni SNS (decisión de costo) y no corre con la instancia detenida.
+
+## Con la instancia detenida: página de pausa
+
+CloudFront intenta la EC2 una sola vez, con 5 s para conectar. Si no conecta, o contesta 500, 502,
+503 o 504, las navegaciones (GET, HEAD) reciben «ARGOS está en pausa» desde el bucket
+`argos-mvp-pausa-616322963974`. La fuente es `terraform/pausa/index.html` y se publica con
+`terraform apply`. La misma página aparece los segundos en que un deploy recrea el frontend.
+
+- `/api/*` y `/public/*` van directo a la EC2, sin caché ni failover: con la instancia detenida
+  responden el 504 de CloudFront en unos 5 s, y los 502, 504 y 404 del backend llegan tal cual.
+- `/assets/*` se cachea en el borde (Managed-CachingOptimized): los nombres llevan hash y nginx los
+  marca `immutable`. El HTML no se cachea, así que un deploy se ve enseguida.
+- La página responde 200 en `/` y 404 en cualquier otra ruta (es el documento de error del sitio
+  S3). El navegador la muestra igual.
+- El bucket es público a propósito, porque el endpoint de sitio web de S3 no admite acceso privado
+  desde CloudFront. No guardar ahí nada más que esa página. CloudFront le habla por HTTP (ese
+  endpoint no tiene HTTPS), así que las navegaciones no reenvían cookies ni query string a ningún
+  origen.
+
+Verificación con la instancia detenida (se espera `200` y `504`, ambos en unos 5 s):
+
+```bash
+curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' https://argosclinical.online/
+curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' https://argosclinical.online/api/health
+```
+
+## Timeouts: lo síncrono responde antes de los 60 s de CloudFront
+
+CloudFront corta cada pedido al origen a los 60 s (`origin_read_timeout`; subirlo requiere pedir a
+AWS un aumento de cuota). Pasado ese tiempo el navegador recibe el 504 de CloudFront aunque el
+backend siga trabajando, y el reintento duplica el trabajo: otra transcripción o otra llamada a
+Bedrock que se cobra.
+
+| Camino | Peor caso | Dónde se configura |
+|---|---|---|
+| Fragmento de transcripción en vivo | 3 intentos de 15 s + 1 s + 2 s de espera = 48 s | `TRANSCRIPCION_REALTIME_TIMEOUT_SECONDS=15` y `TRANSCRIPCION_REALTIME_RETRIES=2` en `deploy-mvp.sh` y `docker-compose.prod.yml` |
+| Cuadro de análisis emocional | 5 s | `EMOCIONES_TIMEOUT_MS` en `docker-compose.prod.yml` |
+| Envío del fragmento desde el navegador | espera 100 s | `GrabacionSesion.tsx` (frontend); el backend ya responde antes de 60 s |
+| Nota clínica y asistente | hasta 2 llamadas de 90 s (nota) o 60 s (asistente) | fijo en `ClienteClaudeIA` (backend); la regeneración pasa a segundo plano en otro cambio |
+| Proxy `/api/` de nginx | 180 s | `nginx.conf` del frontend; no limita, CloudFront corta antes |
+
+## Respaldos y recuperación
+
+| Respaldo | Cuándo | Retención | Qué tiene |
+|---|---|---|---|
+| Snapshot del disco (DLM, etiqueta `Proyecto=argos`) | todos los días 07:00 UTC, aun con la instancia detenida | 7 snapshots | todo el disco: base, fotos, certificados, `.env` |
+| `s3://argos-mvp-operacion-616322963974/backups/argos-<fecha>.dump` | cada 6 h con la instancia encendida y antes de cada deploy | 14 días | la base (`pg_dump -Fc`) |
+| `.../backups/perfiles-<fecha>.tar` | junto con cada dump | 14 días | las fotos de perfil (volumen `argos-profile-uploads`) |
+
+Lo escrito entre el último dump y el apagado solo queda en el snapshot del día siguiente. Las
+grabaciones viven en su propio bucket y no dependen de la instancia. Transcripciones y notas están
+cifradas con el parámetro `/argos/mvp/encryption-key`: un dump solo se lee con la misma clave, así
+que no rotarla ni borrarla antes de restaurar. Las imágenes conservan tags inmutables `sha-*`.
+
+Elegir el respaldo más nuevo:
+
+```bash
+export AWS_PROFILE=argos-nuevos
+aws s3 ls s3://argos-mvp-operacion-616322963974/backups/ | sort | tail -4
+aws ec2 describe-snapshots --owner-ids self --filters Name=tag:Proyecto,Values=argos \
+  --query 'reverse(sort_by(Snapshots,&StartTime))[:3].[SnapshotId,StartTime,State]' --output table
+INSTANCIA=$(aws ec2 describe-instances --filters Name=tag:Name,Values=argos-app \
+  --query 'Reservations[0].Instances[0].InstanceId' --output text)
+```
+
+### A. Datos dañados, la instancia existe: volver a un snapshot
+
+Reemplaza el disco raíz sin cambiar la instancia, la IP ni el rol. Requiere la instancia encendida
+y se reinicia sola; se pierde lo escrito después del snapshot.
+
+1. `aws ec2 start-instances --instance-ids "$INSTANCIA" && aws ec2 wait instance-running --instance-ids "$INSTANCIA"`
+2. `aws ec2 create-replace-root-volume-task --instance-id "$INSTANCIA" --snapshot-id snap-...`
+3. Esperar `succeeded` en
+   `aws ec2 describe-replace-root-volume-tasks --filters Name=instance-id,Values="$INSTANCIA"`.
+4. Verificar que el disco nuevo tenga las etiquetas de las que depende el snapshot diario, y
+   ponerlas si faltan:
+
+   ```bash
+   VOLUMEN=$(aws ec2 describe-instances --instance-ids "$INSTANCIA" \
+     --query 'Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId' --output text)
+   aws ec2 describe-tags --filters Name=resource-id,Values="$VOLUMEN"
+   aws ec2 create-tags --resources "$VOLUMEN" \
+     --tags Key=Respaldo,Value=argos-diario Key=Name,Value=argos-app-raiz
+   ```
+
+5. Correr `Operate MVP` con `start`: renueva el certificado de la IP y espera la salud.
+6. Con todo verificado, borrar el volumen anterior (queda desasociado y se sigue cobrando).
+
+### B. La instancia se perdió: instancia nueva y dump
+
+1. Recrear la instancia. Conserva la IP elástica, el rol y las etiquetas del disco:
+   `cd terraform && terraform workspace select cuenta-nueva && terraform apply -replace aws_instance.app`
+2. Correr `Release MVP` a mano (`action: deploy`, `service: bundle`, `stop_after: false`). Instala el
+   stack con una base vacía.
+3. Restaurar la base desde el dump más nuevo, con el backend en la misma versión que tenía al
+   tomarlo (si el backend actual trae migraciones posteriores, `pg_restore --clean` deja tablas de
+   más y Flyway falla al recrearlas: en ese caso vaciar antes el esquema con el backend detenido,
+   `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`):
+
+   ```bash
+   aws s3 cp s3://argos-mvp-operacion-616322963974/backups/argos-<fecha>.dump ./restaurar.dump
+   ./scripts/restaurar-respaldo.sh ./restaurar.dump argos-nuevos
+   rm ./restaurar.dump   # es una copia de historias clínicas
+   ```
+
+4. Restaurar las fotos de perfil del mismo momento que el dump:
+
+   ```bash
+   aws ssm send-command --instance-ids "$INSTANCIA" --document-name AWS-RunShellScript \
+     --parameters 'commands=["aws s3 cp s3://argos-mvp-operacion-616322963974/backups/perfiles-<fecha>.tar - | docker cp -a - argos-backend:/app/uploads/"]'
+   ```
+
+5. Verificar ingresando a la app (un paciente, una nota, una foto) y detener la instancia.
+
+Todavía no se hizo un simulacro cronometrado: la primera vez, anotar acá cuánto tardó cada camino.
 
 ## Pasar a GPU (g6.2xlarge) y volver a CPU
 
