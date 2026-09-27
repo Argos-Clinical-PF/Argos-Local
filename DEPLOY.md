@@ -422,10 +422,12 @@ CloudFront intenta la EC2 una sola vez, con 5 s para conectar. Si no conecta, o 
 - El bucket es público a propósito, porque el endpoint de sitio web de S3 no admite acceso privado
   desde CloudFront. No guardar ahí nada más que esa página. CloudFront le habla por HTTP (ese
   endpoint no tiene HTTPS), así que las navegaciones no reenvían cookies ni query string a ningún
-  origen. El path sí viaja: en un failover, el token de un link de consentimiento
-  (`/consentimiento/:token`, `/consentimiento/revocar/:token`) llega por HTTP al bucket. Por eso
-  nunca activar el registro de accesos del servidor (server access logging) en
-  `argos-mvp-pausa-616322963974`: guardaría esos tokens.
+  origen. El path sí viaja. Los links de consentimiento nuevos llevan el token en el fragmento
+  (`/consentimiento#t=...`), que el navegador nunca envía, pero los links de revocación emitidos
+  antes de ese cambio no vencen y lo llevan en el path (`/consentimiento/revocar/:token`): en un
+  failover llegan por HTTP al bucket. Por eso nunca activar el registro de accesos del servidor
+  (server access logging) en `argos-mvp-pausa-616322963974`: guardaría esos tokens. El nginx del
+  frontend enmascara el token de esas rutas y de `/public/consents/` en su registro de acceso.
 
 Verificación con la instancia detenida (se espera `200` y `504`, ambos en unos 5 s):
 

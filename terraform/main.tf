@@ -506,8 +506,9 @@ resource "aws_cloudfront_distribution" "app" {
   # Navegación (HTML de la SPA): si la EC2 no contesta, la página de pausa. Un origin group solo
   # admite GET/HEAD/OPTIONS, así que todo lo que escribe va por los comportamientos de abajo. Sin
   # política de origen: nginx sirve estáticos y no necesita cookies ni query string, que no llegan
-  # al bucket de pausa (se alcanza por HTTP). El path sí: en un failover, el token de los links de
-  # consentimiento (/consentimiento/:token) viaja por HTTP hasta el bucket.
+  # al bucket de pausa (se alcanza por HTTP). El path sí: los links de consentimiento llevan el token
+  # en el fragmento (#t=), que no sale del navegador, pero los de revocación emitidos antes lo
+  # llevan en el path (/consentimiento/revocar/:token) y en un failover viajan hasta el bucket.
   default_cache_behavior {
     target_origin_id       = "argos-ec2-o-pausa"
     viewer_protocol_policy = "redirect-to-https"
