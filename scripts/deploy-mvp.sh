@@ -3,7 +3,7 @@ set -euo pipefail
 
 REGION="${AWS_REGION:-us-east-1}"
 PARAM_PREFIX="/argos/mvp"
-APP_DIR="/home/ec2-user/argos"
+APP_DIR="${APP_DIR:-/home/ec2-user/argos}"
 
 : "${BACKEND_TAG:?BACKEND_TAG es obligatorio}"
 : "${FRONTEND_TAG:?FRONTEND_TAG es obligatorio}"
@@ -26,6 +26,17 @@ if [ "${FORZAR_DESPLIEGUE:-false}" != "true" ] \
   else
     echo "Aviso: el backend no respondió deployment-safety; se despliega igual."
   fi
+fi
+
+# El workflow deja el bundle nuevo en entrante/ y recién acá, pasado el gate, reemplaza los archivos
+# de la app: un deploy cancelado no deja un Caddyfile o un compose sin desplegar que el próximo
+# arranque del gateway o un restaurar-respaldo.sh tomarían con el .env viejo.
+ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$ORIGEN" != "$APP_DIR" ]; then
+  mkdir -p "$APP_DIR"
+  cp "$ORIGEN"/docker-compose.prod.yml "$ORIGEN"/Caddyfile "$ORIGEN"/deploy-mvp.sh "$ORIGEN"/refresh-ip-certificate.sh "$APP_DIR"/
+  cp "$ORIGEN"/docker-compose.gpu.yml "$APP_DIR"/ 2>/dev/null || true
+  chmod 700 "$APP_DIR"/deploy-mvp.sh "$APP_DIR"/refresh-ip-certificate.sh
 fi
 
 get_parameter() {

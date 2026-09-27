@@ -331,7 +331,10 @@ despreciables al volumen actual. Antes y después de cada demo, confirmar que la
    responde, no hay sesión que proteger y sigue. Si el workflow tuvo que encender la EC2, el gate se
    omite: recién encendida no puede haber una sesión en vivo. Una sesión que quedó `EN_CURSO`
    porque nadie la finalizó también bloquea: finalizarla desde la app o usar `forzar=true`.
-2. Regenera el `.env`, baja las imágenes, toma un respaldo (dump y fotos) e instala los timers.
+2. Copia el bundle, que el workflow dejó en `/home/ec2-user/argos/entrante/`, a la carpeta de la
+   app: un deploy cancelado no deja un `Caddyfile` ni un compose sin desplegar junto al `.env`
+   viejo. Regenera el `.env`, baja las imágenes, toma un respaldo (dump y fotos) e instala los
+   timers.
 3. `docker compose up -d --remove-orphans`, sin `down`: solo se recrean los servicios cuya imagen o
    configuración cambió, así que un release del frontend reinicia solo nginx y no Postgres ni los
    modelos. El hash del `Caddyfile` va como label del gateway para que un cambio de ese archivo
@@ -345,9 +348,10 @@ Si el comando de deploy o el smoke test fallan, el workflow vuelve solo al últi
 promovido (`deploy/manifests/current.json`, que no cambió) con el bundle de ese release, repite el
 smoke test y el run termina igual en rojo. El resumen del run dice a qué release volvió. No revierte
 cuando el gate canceló el deploy (no cambió nada), cuando la acción era un `rollback` manual, ni
-cuando el comando SSM seguía corriendo. Los bundles de `deploy/` se borran a los 30 días: si el
-último release promovido es más viejo, el run lo avisa y hay que usar `action: rollback` a mano
-(vuelve a `previous.json`) o desplegar tags `sha-*` conocidos.
+cuando el comando SSM seguía corriendo. Los bundles de `deploy/releases/` se borran a los 365
+días; los manifiestos no se borran. Si el bundle del último release promovido ya no existe, el run
+lo avisa: relanzar `Release MVP` con `action: deploy` y `service: bundle`, que toma los tags de
+`current.json` con el bundle de main.
 
 ## Logs
 
@@ -398,7 +402,10 @@ CloudFront intenta la EC2 una sola vez, con 5 s para conectar. Si no conecta, o 
 - El bucket es público a propósito, porque el endpoint de sitio web de S3 no admite acceso privado
   desde CloudFront. No guardar ahí nada más que esa página. CloudFront le habla por HTTP (ese
   endpoint no tiene HTTPS), así que las navegaciones no reenvían cookies ni query string a ningún
-  origen.
+  origen. El path sí viaja: en un failover, el token de un link de consentimiento
+  (`/consentimiento/:token`, `/consentimiento/revocar/:token`) llega por HTTP al bucket. Por eso
+  nunca activar el registro de accesos del servidor (server access logging) en
+  `argos-mvp-pausa-616322963974`: guardaría esos tokens.
 
 Verificación con la instancia detenida (se espera `200` y `504`, ambos en unos 5 s):
 
@@ -471,11 +478,15 @@ y se reinicia sola; se pierde lo escrito después del snapshot.
 
 ### B. La instancia se perdió: instancia nueva y dump
 
+Anotar ahora la marca `<fecha>` del dump y del tar de fotos a restaurar: unos 20 minutos después de
+encender la instancia nueva, `argos-respaldo-base` sube un dump de la base vacía y un tar vacío que
+pasan a ser los más nuevos de `backups/`.
+
 1. Recrear la instancia. Conserva la IP elástica, el rol y las etiquetas del disco:
    `cd terraform && terraform workspace select cuenta-nueva && terraform apply -replace aws_instance.app`
 2. Correr `Release MVP` a mano (`action: deploy`, `service: bundle`, `stop_after: false`). Instala el
    stack con una base vacía.
-3. Restaurar la base desde el dump más nuevo, con el backend en la misma versión que tenía al
+3. Restaurar la base desde el dump anotado, con el backend en la misma versión que tenía al
    tomarlo (si el backend actual trae migraciones posteriores, `pg_restore --clean` deja tablas de
    más y Flyway falla al recrearlas: en ese caso vaciar antes el esquema con el backend detenido,
    `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`):

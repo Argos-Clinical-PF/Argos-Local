@@ -284,6 +284,9 @@ jobs:
             --instance-id "${{ steps.aws.outputs.instance_id }}" \
             --query StandardOutputContent --output text || true
 
+      # El bundle queda en entrante/ y deploy-mvp.sh lo copia a la app recién después del gate de
+      # trabajo clínico. Un bundle anterior al gate (rollback a un release viejo) no sabe copiarse
+      # y se aplica directo, como antes.
       - name: Desplegar manifiesto
         id: command
         env:
@@ -297,15 +300,17 @@ jobs:
             --arg transcripcion "${{ steps.manifest.outputs.transcripcion }}" \
             --arg emociones "${{ steps.manifest.outputs.emociones }}" \
             '{commands:[
-              "mkdir -p /home/ec2-user/argos",
-              "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/docker-compose.prod.yml",
-              "aws s3 cp \($prefix)/docker-compose.gpu.yml /home/ec2-user/argos/docker-compose.gpu.yml || true",
-              "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/Caddyfile",
-              "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh",
-              "aws s3 cp \($prefix)/refresh-ip-certificate.sh /home/ec2-user/argos/refresh-ip-certificate.sh",
-              "chmod 700 /home/ec2-user/argos/deploy-mvp.sh",
-              "chmod 700 /home/ec2-user/argos/refresh-ip-certificate.sh",
-              "AWS_REGION=\($region) FORZAR_DESPLIEGUE=\($forzar) BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) EMOCIONES_TAG=\($emociones) /home/ec2-user/argos/deploy-mvp.sh"
+              "rm -rf /home/ec2-user/argos/entrante",
+              "mkdir -p /home/ec2-user/argos/entrante",
+              "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/entrante/docker-compose.prod.yml",
+              "aws s3 cp \($prefix)/docker-compose.gpu.yml /home/ec2-user/argos/entrante/docker-compose.gpu.yml || true",
+              "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/entrante/Caddyfile",
+              "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/entrante/deploy-mvp.sh",
+              "aws s3 cp \($prefix)/refresh-ip-certificate.sh /home/ec2-user/argos/entrante/refresh-ip-certificate.sh",
+              "chmod 700 /home/ec2-user/argos/entrante/deploy-mvp.sh",
+              "chmod 700 /home/ec2-user/argos/entrante/refresh-ip-certificate.sh",
+              "grep -q ORIGEN= /home/ec2-user/argos/entrante/deploy-mvp.sh || cp /home/ec2-user/argos/entrante/* /home/ec2-user/argos/",
+              "AWS_REGION=\($region) FORZAR_DESPLIEGUE=\($forzar) BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) EMOCIONES_TAG=\($emociones) /home/ec2-user/argos/entrante/deploy-mvp.sh"
             ]}')
           COMMAND_ID=$(aws ssm send-command --instance-ids "${{ steps.aws.outputs.instance_id }}" \
             --document-name AWS-RunShellScript --parameters "$PARAMETERS" \
@@ -398,7 +403,7 @@ jobs:
           PREFIX="s3://${BUCKET}/deploy/releases/${RELEASE}"
           if [ -z "$RELEASE" ] || ! aws s3api head-object --bucket "$BUCKET" \
             --key "deploy/releases/${RELEASE}/deploy-mvp.sh" >/dev/null 2>&1; then
-            echo "::error::No hay un release sano con bundle disponible para revertir; usar action=rollback a mano."
+            echo "::error::No hay un release sano con bundle disponible para revertir; relanzar con action=deploy y service=bundle (tags de current.json con el bundle de main)."
             exit 1
           fi
           echo "Revirtiendo a $RELEASE"

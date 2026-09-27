@@ -494,8 +494,9 @@ resource "aws_cloudfront_distribution" "app" {
 
   # Navegación (HTML de la SPA): si la EC2 no contesta, la página de pausa. Un origin group solo
   # admite GET/HEAD/OPTIONS, así que todo lo que escribe va por los comportamientos de abajo. Sin
-  # política de origen: nginx sirve estáticos y no necesita cookies ni query string, y así los
-  # tokens de los links de contraseña no viajan al bucket de pausa, que se alcanza por HTTP.
+  # política de origen: nginx sirve estáticos y no necesita cookies ni query string, que no llegan
+  # al bucket de pausa (se alcanza por HTTP). El path sí: en un failover, el token de los links de
+  # consentimiento (/consentimiento/:token) viaja por HTTP hasta el bucket.
   default_cache_behavior {
     target_origin_id       = "argos-ec2-o-pausa"
     viewer_protocol_policy = "redirect-to-https"
@@ -647,14 +648,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "operacion" {
     }
   }
 
+  # Solo los bundles: los manifiestos (current.json, previous.json) no vencen nunca, porque el
+  # rollback los necesita aunque la instancia pase meses detenida sin deploys.
   rule {
     id     = "eliminar-bundles-antiguos"
     status = "Enabled"
     filter {
-      prefix = "deploy/"
+      prefix = "deploy/releases/"
     }
     expiration {
-      days = 30
+      days = 365
     }
   }
   # El volcado de la migración es una copia completa de historias clínicas: vive lo que dura el
