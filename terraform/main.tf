@@ -224,6 +224,54 @@ data "aws_cloudfront_origin_request_policy" "todos_sin_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
+# Cabeceras de seguridad en cada respuesta del borde: la SPA, la API, los assets y la página de pausa.
+# La CSP permite solo lo que el frontend usa: sus propios scripts más dos inline por hash (el tema de
+# Argos-Frontend/index.html y el de pausa/index.html; si cambia alguno, hay que recalcular su hash), las
+# URLs firmadas del bucket de grabaciones para escuchar y subir, y las dos APIs de geografía.
+locals {
+  origenes_grabaciones = "https://${aws_s3_bucket.grabaciones.bucket_regional_domain_name} https://${aws_s3_bucket.grabaciones.bucket_domain_name}"
+  csp = join("; ", [
+    "default-src 'self'",
+    "script-src 'self' 'sha256-ELLtivtgW4M8MKRCNWjB0vPMqMDWxB47pOPne1Coizg=' 'sha256-c12HwDqeIDyjNsk/Ku7ySwTrSZ6dOVMPBM97WIorqo4='",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "media-src 'self' blob: ${local.origenes_grabaciones}",
+    "connect-src 'self' ${local.origenes_grabaciones} https://countriesnow.space https://apis.datos.gob.ar",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ])
+}
+
+resource "aws_cloudfront_response_headers_policy" "seguridad" {
+  name = "argos-seguridad"
+
+  security_headers_config {
+    strict_transport_security {
+      access_control_max_age_sec = 31536000
+      include_subdomains         = true
+      override                   = true
+    }
+    content_type_options {
+      override = true
+    }
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+    referrer_policy {
+      referrer_policy = "no-referrer"
+      override        = true
+    }
+    content_security_policy {
+      content_security_policy = local.csp
+      override                = true
+    }
+  }
+}
+
 # La zona y el certificado se crean acá: en una cuenta nueva no existe nada que leer, y
 # dejarlos como `data` obligaba a prepararlos a mano antes del primer apply.
 resource "aws_route53_zone" "app" {
@@ -510,12 +558,13 @@ resource "aws_cloudfront_distribution" "app" {
   # en el fragmento (#t=), que no sale del navegador, pero los de revocación emitidos antes lo
   # llevan en el path (/consentimiento/revocar/:token) y en un failover viajan hasta el bucket.
   default_cache_behavior {
-    target_origin_id       = "argos-ec2-o-pausa"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-    cache_policy_id        = data.aws_cloudfront_cache_policy.sin_cache.id
+    target_origin_id           = "argos-ec2-o-pausa"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = data.aws_cloudfront_cache_policy.sin_cache.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.seguridad.id
 
     function_association {
       event_type   = "viewer-request"
@@ -528,14 +577,15 @@ resource "aws_cloudfront_distribution" "app" {
   dynamic "ordered_cache_behavior" {
     for_each = ["/api/*", "/public/*"]
     content {
-      path_pattern             = ordered_cache_behavior.value
-      target_origin_id         = "argos-ec2-origin"
-      viewer_protocol_policy   = "redirect-to-https"
-      allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-      cached_methods           = ["GET", "HEAD"]
-      compress                 = true
-      cache_policy_id          = data.aws_cloudfront_cache_policy.sin_cache.id
-      origin_request_policy_id = data.aws_cloudfront_origin_request_policy.todos_sin_host.id
+      path_pattern               = ordered_cache_behavior.value
+      target_origin_id           = "argos-ec2-origin"
+      viewer_protocol_policy     = "redirect-to-https"
+      allowed_methods            = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods             = ["GET", "HEAD"]
+      compress                   = true
+      cache_policy_id            = data.aws_cloudfront_cache_policy.sin_cache.id
+      origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.todos_sin_host.id
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.seguridad.id
 
       function_association {
         event_type   = "viewer-request"
@@ -547,13 +597,14 @@ resource "aws_cloudfront_distribution" "app" {
   # Los assets llevan hash en el nombre y nginx ya los marca immutable: se sirven desde el borde
   # más cercano en vez de ir a us-east-1 en cada visita. El HTML sigue sin caché.
   ordered_cache_behavior {
-    path_pattern           = "/assets/*"
-    target_origin_id       = "argos-ec2-origin"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-    cache_policy_id        = data.aws_cloudfront_cache_policy.optimizada.id
+    path_pattern               = "/assets/*"
+    target_origin_id           = "argos-ec2-origin"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = data.aws_cloudfront_cache_policy.optimizada.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.seguridad.id
   }
 
   restrictions {
