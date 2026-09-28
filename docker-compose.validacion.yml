@@ -40,7 +40,9 @@ services:
       AWS_EC2_METADATA_DISABLED: "true"
       TRANSCRIPCION_SERVICE_URL: http://host.docker.internal:9000
       EMOCIONES_SERVICE_URL: http://host.docker.internal:9010
-      JAVA_TOOL_OPTIONS: -Xmx768m
+      # G1 como en producción: con 1536 MB de límite (menos de 1792) la ergonomía de la JVM elige
+      # SerialGC, que frena la aplicación en cada recolección y hacía pesimista toda medición de carga.
+      JAVA_TOOL_OPTIONS: -Xmx768m -XX:+UseG1GC
       MAVEN_OPTS: -Xmx384m
     ports:
       - "127.0.0.1:8080:8080"

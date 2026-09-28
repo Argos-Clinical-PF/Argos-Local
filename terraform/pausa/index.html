@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="es-AR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>ARGOS está en pausa</title>
+    <!-- La CSP de CloudFront (main.tf, local.csp) autoriza este script por su hash: si cambia, recalcularlo. -->
+    <script>
+      /* Mismo origen que la app: si el profesional eligió un tema en ARGOS, se respeta. */
+      try {
+        var tema = window.localStorage.getItem('argos:tema')
+        if (tema === 'claro' || tema === 'oscuro') document.documentElement.dataset.tema = tema
+      } catch (e) {}
+    </script>
+    <style>
+      /* Colores de src/estilos/tema.css del frontend (pares verificados AA en ambos temas). */
+      :root {
+        color-scheme: light;
+        --fondo: #f4f7fa;
+        --superficie: #ffffff;
+        --borde: #e6eaf0;
+        --texto-fuerte: #0f172a;
+        --texto: #334155;
+        --texto-suave: #4f5d70;
+        --primario: #15803d;
+        --primario-hover: #15713a;
+        --sobre-primario: #ffffff;
+        --foco: rgba(21, 128, 61, 0.45);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-tema='claro']) {
+          color-scheme: dark;
+          --fondo: #0e1420;
+          --superficie: #161d2b;
+          --borde: #2a3549;
+          --texto-fuerte: #f1f5f9;
+          --texto: #d5dde8;
+          --texto-suave: #a6b2c4;
+          --primario: #3fca74;
+          --primario-hover: #55d888;
+          --sobre-primario: #04240f;
+          --foco: rgba(63, 202, 116, 0.5);
+        }
+      }
+      :root[data-tema='oscuro'] {
+        color-scheme: dark;
+        --fondo: #0e1420;
+        --superficie: #161d2b;
+        --borde: #2a3549;
+        --texto-fuerte: #f1f5f9;
+        --texto: #d5dde8;
+        --texto-suave: #a6b2c4;
+        --primario: #3fca74;
+        --primario-hover: #55d888;
+        --sobre-primario: #04240f;
+        --foco: rgba(63, 202, 116, 0.5);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px 16px;
+        background: var(--fondo);
+        color: var(--texto);
+        font: 16px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 34rem;
+        padding: clamp(24px, 5vw, 40px);
+        background: var(--superficie);
+        border: 1px solid var(--borde);
+        border-radius: 16px;
+      }
+      .marca {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 24px;
+        color: var(--texto-fuerte);
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      h1 {
+        margin: 0 0 12px;
+        color: var(--texto-fuerte);
+        font-size: clamp(1.5rem, 4vw + 0.5rem, 2rem);
+        line-height: 1.2;
+      }
+      h2 {
+        margin: 24px 0 8px;
+        color: var(--texto-fuerte);
+        font-size: 1rem;
+      }
+      p {
+        margin: 0;
+      }
+      ul {
+        margin: 0;
+        padding-left: 1.2em;
+        color: var(--texto-suave);
+      }
+      li + li {
+        margin-top: 6px;
+      }
+      .boton {
+        display: inline-block;
+        margin-top: 28px;
+        padding: 12px 22px;
+        border-radius: 10px;
+        background: var(--primario);
+        color: var(--sobre-primario);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      .boton:hover {
+        background: var(--primario-hover);
+      }
+      .boton:focus-visible {
+        outline: 3px solid var(--foco);
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="marca">
+        <svg width="36" height="36" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+          <circle cx="24" cy="24" r="23" fill="#0b2f27" />
+          <circle cx="24" cy="24" r="17" fill="none" stroke="#264245" stroke-width="4" />
+          <circle cx="24" cy="24" r="11" fill="#5ba397" />
+          <circle cx="24" cy="24" r="10" fill="none" stroke="#3b6664" stroke-width="3" />
+          <circle cx="24" cy="24" r="5" fill="#0a1a18" />
+          <circle cx="29" cy="18" r="2" fill="#ffffff" />
+          <circle cx="24" cy="24" r="22.5" fill="none" stroke="#86efac" stroke-width="1.5" />
+        </svg>
+        ARGOS Clinical
+      </div>
+      <h1>ARGOS está en pausa</h1>
+      <p>
+        El servidor está apagado para ahorrar recursos o se está actualizando. Lo que ya guardaste
+        no se pierde.
+      </p>
+      <h2>Qué podés hacer</h2>
+      <ul>
+        <li>Si se está actualizando, volvé a intentar en un par de minutos.</li>
+        <li>
+          Si tenés una sesión o una demostración agendada, avisale al equipo de ARGOS para que lo
+          encienda: tarda entre 4 y 8 minutos en quedar listo.
+        </li>
+      </ul>
+      <a class="boton" href="">Reintentar</a>
+    </main>
+  </body>
+</html>

@@ -47,6 +47,9 @@ jobs:
         with:
           scandir: ./scripts
 
+      - name: Probar gate de deploy y vigía
+        run: ./scripts/probar-deploy-mvp.sh
+
       - name: Validar trazabilidad del bundle de release
         run: |
           grep -Fq 'id: bundle' .github/workflows/deploy.yml
@@ -54,7 +57,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.8
+          terraform_version: 1.14.8
 
       - name: Validar Terraform
         working-directory: terraform

@@ -35,6 +35,11 @@ on:
         required: true
         type: boolean
         default: true
+      forzar:
+        description: Desplegar aunque haya sesiones, cargas o jobs post-sesión activos (corta la sesión en vivo)
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -210,6 +215,7 @@ jobs:
           aws s3 cp candidate.json "$PREFIX/manifest.json"
 
       - name: Iniciar EC2
+        id: ec2
         run: |
           INSTANCE_ID="${{ steps.aws.outputs.instance_id }}"
           ESTADO=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
@@ -221,6 +227,9 @@ jobs:
           fi
           if [ "$ESTADO" = "stopped" ]; then
             aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+            # Recién encendida no puede haber una sesión en vivo: una sesión EN_CURSO que quedó
+            # abierta al apagar no debe trabar el deploy (los jobs post-sesión se retoman solos).
+            echo "arrancada=true" >> "$GITHUB_OUTPUT"
           elif [ "$ESTADO" != "running" ] && [ "$ESTADO" != "pending" ]; then
             echo "Estado EC2 no recuperable para deploy: $ESTADO"
             exit 1
@@ -275,26 +284,33 @@ jobs:
             --instance-id "${{ steps.aws.outputs.instance_id }}" \
             --query StandardOutputContent --output text || true
 
+      # El bundle queda en entrante/ y deploy-mvp.sh lo copia a la app recién después del gate de
+      # trabajo clínico. Un bundle anterior al gate (rollback a un release viejo) no sabe copiarse
+      # y se aplica directo, como antes.
       - name: Desplegar manifiesto
         id: command
+        env:
+          FORZAR: ${{ (inputs.forzar || steps.ec2.outputs.arrancada == 'true') && 'true' || 'false' }}
         run: |
           PREFIX="s3://${{ steps.aws.outputs.bucket }}/deploy/releases/${{ steps.manifest.outputs.release_id }}"
           PARAMETERS=$(jq -cn \
-            --arg prefix "$PREFIX" --arg region "$AWS_REGION" \
+            --arg prefix "$PREFIX" --arg region "$AWS_REGION" --arg forzar "$FORZAR" \
             --arg backend "${{ steps.manifest.outputs.backend }}" \
             --arg frontend "${{ steps.manifest.outputs.frontend }}" \
             --arg transcripcion "${{ steps.manifest.outputs.transcripcion }}" \
             --arg emociones "${{ steps.manifest.outputs.emociones }}" \
             '{commands:[
-              "mkdir -p /home/ec2-user/argos",
-              "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/docker-compose.prod.yml",
-              "aws s3 cp \($prefix)/docker-compose.gpu.yml /home/ec2-user/argos/docker-compose.gpu.yml || true",
-              "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/Caddyfile",
-              "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh",
-              "aws s3 cp \($prefix)/refresh-ip-certificate.sh /home/ec2-user/argos/refresh-ip-certificate.sh",
-              "chmod 700 /home/ec2-user/argos/deploy-mvp.sh",
-              "chmod 700 /home/ec2-user/argos/refresh-ip-certificate.sh",
-              "AWS_REGION=\($region) BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) EMOCIONES_TAG=\($emociones) /home/ec2-user/argos/deploy-mvp.sh"
+              "rm -rf /home/ec2-user/argos/entrante",
+              "mkdir -p /home/ec2-user/argos/entrante",
+              "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/entrante/docker-compose.prod.yml",
+              "aws s3 cp \($prefix)/docker-compose.gpu.yml /home/ec2-user/argos/entrante/docker-compose.gpu.yml || true",
+              "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/entrante/Caddyfile",
+              "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/entrante/deploy-mvp.sh",
+              "aws s3 cp \($prefix)/refresh-ip-certificate.sh /home/ec2-user/argos/entrante/refresh-ip-certificate.sh",
+              "chmod 700 /home/ec2-user/argos/entrante/deploy-mvp.sh",
+              "chmod 700 /home/ec2-user/argos/entrante/refresh-ip-certificate.sh",
+              "grep -q ORIGEN= /home/ec2-user/argos/entrante/deploy-mvp.sh || cp /home/ec2-user/argos/entrante/* /home/ec2-user/argos/",
+              "AWS_REGION=\($region) FORZAR_DESPLIEGUE=\($forzar) BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) EMOCIONES_TAG=\($emociones) /home/ec2-user/argos/entrante/deploy-mvp.sh"
             ]}')
           COMMAND_ID=$(aws ssm send-command --instance-ids "${{ steps.aws.outputs.instance_id }}" \
             --document-name AWS-RunShellScript --parameters "$PARAMETERS" \
@@ -307,6 +323,15 @@ jobs:
             [ "$ESTADO" = "Success" ] && exit 0
             case "$ESTADO" in
               Failed|Cancelled|TimedOut)
+                CODIGO=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
+                  --instance-id "${{ steps.aws.outputs.instance_id }}" --query ResponseCode --output text 2>/dev/null || true)
+                # 75: deploy-mvp.sh no tocó nada porque hay trabajo clínico activo. No se revierte
+                # ni se apaga la instancia.
+                if [ "$CODIGO" = "75" ]; then
+                  echo "bloqueado=true" >> "$GITHUB_OUTPUT"
+                  echo "::error::Deploy cancelado: hay sesiones, cargas o jobs post-sesión activos. Reintentar cuando terminen, o relanzar Release MVP con forzar=true."
+                  exit 1
+                fi
                 echo "El comando SSM termino en estado $ESTADO tras $((intento * 10))s."
                 exit 1
                 ;;
@@ -323,12 +348,15 @@ jobs:
         if: failure() && steps.command.outputs.command_id
         run: aws ssm get-command-invocation --command-id "${{ steps.command.outputs.command_id }}" --instance-id "${{ steps.aws.outputs.instance_id }}"
 
+      # La raíz se valida por el HTML de la SPA: con la EC2 caída CloudFront también responde 200
+      # en `/`, pero con la página de pausa.
       - name: Smoke test público
+        id: smoke
         run: |
           for _ in $(seq 1 45); do
             if curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/api/health" >/dev/null \
               && curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/api/health/readiness" >/dev/null \
-              && curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/" >/dev/null; then
+              && [[ "$(curl --fail --silent --show-error "${{ steps.aws.outputs.url }}/")" == *'<div id="root">'* ]]; then
               PROTECTED_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
                 "${{ steps.aws.outputs.url }}/api/patients")
               [ "$PROTECTED_STATUS" = "401" ] && exit 0
@@ -345,6 +373,82 @@ jobs:
             aws s3 cp previous.json "$PREVIOUS"
           fi
           aws s3 cp candidate.json "$CURRENT"
+
+      # Un deploy que no pasa el smoke test deja producción rota hasta que alguien lo note. Se
+      # vuelve solo al último manifiesto promovido (current.json no cambió) con su propio bundle,
+      # y el job igual termina en rojo para que se vea.
+      - name: Revertir al último manifiesto sano
+        if: >-
+          failure() && (inputs.action || 'deploy') == 'deploy'
+          && steps.command.outputs.command_id != '' && steps.command.outputs.bloqueado != 'true'
+          && (steps.command.outcome == 'failure' || steps.smoke.outcome == 'failure')
+        env:
+          BUCKET: ${{ steps.aws.outputs.bucket }}
+          INSTANCE_ID: ${{ steps.aws.outputs.instance_id }}
+          URL: ${{ steps.aws.outputs.url }}
+          COMANDO_FALLIDO: ${{ steps.command.outputs.command_id }}
+        run: |
+          ORIGINAL=$(aws ssm get-command-invocation --command-id "$COMANDO_FALLIDO" \
+            --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || true)
+          case "$ORIGINAL" in
+            Pending|InProgress|Delayed)
+              echo "::error::El deploy sigue corriendo en la instancia ($ORIGINAL); no se revierte encima."
+              exit 1
+              ;;
+          esac
+          RELEASE=""
+          if aws s3 cp "s3://${BUCKET}/deploy/manifests/current.json" sano.json; then
+            RELEASE=$(jq -r '.releaseId // empty' sano.json)
+          fi
+          PREFIX="s3://${BUCKET}/deploy/releases/${RELEASE}"
+          if [ -z "$RELEASE" ] || ! aws s3api head-object --bucket "$BUCKET" \
+            --key "deploy/releases/${RELEASE}/deploy-mvp.sh" >/dev/null 2>&1; then
+            echo "::error::No hay un release sano con bundle disponible para revertir; relanzar con action=deploy y service=bundle (tags de current.json con el bundle de main)."
+            exit 1
+          fi
+          echo "Revirtiendo a $RELEASE"
+          PARAMETERS=$(jq -cn --arg prefix "$PREFIX" --arg region "$AWS_REGION" \
+            --arg backend "$(jq -r .backend sano.json)" --arg frontend "$(jq -r .frontend sano.json)" \
+            --arg transcripcion "$(jq -r .transcripcion sano.json)" --arg emociones "$(jq -r .emociones sano.json)" \
+            '{commands:[
+              "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/docker-compose.prod.yml",
+              "aws s3 cp \($prefix)/docker-compose.gpu.yml /home/ec2-user/argos/docker-compose.gpu.yml || true",
+              "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/Caddyfile",
+              "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh",
+              "aws s3 cp \($prefix)/refresh-ip-certificate.sh /home/ec2-user/argos/refresh-ip-certificate.sh || true",
+              "chmod 700 /home/ec2-user/argos/deploy-mvp.sh /home/ec2-user/argos/refresh-ip-certificate.sh",
+              "AWS_REGION=\($region) FORZAR_DESPLIEGUE=true BACKEND_TAG=\($backend) FRONTEND_TAG=\($frontend) TRANSCRIPCION_TAG=\($transcripcion) EMOCIONES_TAG=\($emociones) /home/ec2-user/argos/deploy-mvp.sh"
+            ]}')
+          COMMAND_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript --parameters "$PARAMETERS" \
+            --query 'Command.CommandId' --output text)
+          ESTADO=""
+          for _ in $(seq 1 180); do
+            ESTADO=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || true)
+            case "$ESTADO" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 10
+          done
+          if [ "$ESTADO" != "Success" ]; then
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+            echo "::error::El rollback automático a $RELEASE también falló (estado ${ESTADO:-desconocido})."
+            echo "- Rollback automático a \`$RELEASE\`: **falló**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          for _ in $(seq 1 45); do
+            if curl --fail --silent --show-error "$URL/api/health" >/dev/null \
+              && curl --fail --silent --show-error "$URL/api/health/readiness" >/dev/null \
+              && [[ "$(curl --fail --silent --show-error "$URL/")" == *'<div id="root">'* ]] \
+              && [ "$(curl --silent --output /dev/null --write-out '%{http_code}' "$URL/api/patients")" = "401" ]; then
+              echo "::warning::El deploy falló y producción volvió a $RELEASE."
+              echo "- Deploy fallido; producción volvió a \`$RELEASE\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Se revirtió a $RELEASE pero el smoke test sigue fallando."
+          echo "- Rollback automático a \`$RELEASE\`: smoke test en rojo" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - name: Verificar apagado seguro
         id: shutdown_safety
@@ -382,7 +486,7 @@ jobs:
           echo "safe=false" >> "$GITHUB_OUTPUT"
 
       - name: Detener EC2
-        if: always() && (github.event_name == 'push' || inputs.stop_after) && vars.DETENER_EC2_TRAS_DEPLOY != 'false' && (failure() || steps.shutdown_safety.outputs.safe == 'true')
+        if: always() && (github.event_name == 'push' || inputs.stop_after) && vars.DETENER_EC2_TRAS_DEPLOY != 'false' && steps.command.outputs.bloqueado != 'true' && (failure() || steps.shutdown_safety.outputs.safe == 'true')
         run: |
           INSTANCE_ID="${{ steps.aws.outputs.instance_id }}"
           ESTADO=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \

@@ -24,11 +24,20 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    # Los logs van a CloudWatch (/argos/mvp, 14 días) porque cada deploy recrea los contenedores y
+    # con ellos se perdían. `docker logs` sigue andando por la caché local de Docker (dual logging),
+    # con el mismo tope de disco que tenía json-file. En modo non-blocking, si CloudWatch no responde
+    # el contenedor arranca igual y se descartan líneas en vez de frenar la aplicación.
     logging: &logging
-      driver: json-file
+      driver: awslogs
       options:
-        max-size: 10m
-        max-file: "3"
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /argos/mvp
+        tag: "{{.Name}}"
+        mode: non-blocking
+        max-buffer-size: 4m
+        cache-max-size: 10m
+        cache-max-file: "3"
     restart: unless-stopped
 
   transcripcion:
@@ -98,8 +107,9 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-${PUBLIC_BASE_URL}}
       APP_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       TRANSCRIPCION_SERVICE_URL: http://transcripcion:9000
-      TRANSCRIPCION_REALTIME_TIMEOUT_SECONDS: ${TRANSCRIPCION_REALTIME_TIMEOUT_SECONDS:-20}
-      TRANSCRIPCION_REALTIME_RETRIES: ${TRANSCRIPCION_REALTIME_RETRIES:-3}
+      # CloudFront corta a los 60 s: 3 intentos de 15 s + 1 s + 2 s de espera = 48 s en el peor caso.
+      TRANSCRIPCION_REALTIME_TIMEOUT_SECONDS: ${TRANSCRIPCION_REALTIME_TIMEOUT_SECONDS:-15}
+      TRANSCRIPCION_REALTIME_RETRIES: ${TRANSCRIPCION_REALTIME_RETRIES:-2}
       TRANSCRIPCION_REALTIME_BACKOFF_MS: ${TRANSCRIPCION_REALTIME_BACKOFF_MS:-1000}
       EMOCIONES_SERVICE_URL: http://emociones:9010
       EMOCIONES_ENABLED: "true"
@@ -118,7 +128,12 @@ services:
       MAIL_SMTP_AUTH: "true"
       MAIL_SMTP_STARTTLS_ENABLE: "true"
       LOGIN_MAX_FAILED_ATTEMPTS: "5"
-      LOGIN_LOCK_MINUTES: "15"
+      # Corto a propósito: el límite por IP es la defensa principal; un bloqueo largo por cuenta
+      # permitiría dejar afuera a un profesional sabiendo solo su email.
+      LOGIN_LOCK_MINUTES: "5"
+      # Con este secreto el backend confía en CloudFront-Viewer-Address solo si la request trae
+      # el header que agrega CloudFront (ver DEPLOY.md, «Secreto de origen»).
+      ARGOS_SECRETO_CLOUDFRONT: ${ARGOS_SECRETO_CLOUDFRONT:-}
       # Back Office: sin estas dos variables, el seed del primer ADMIN_PLATAFORMA no se ejecuta
       # (nunca hay credenciales por defecto conocidas). Ver Argos-Backend AdminSeedRunner.
       ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}
@@ -189,6 +204,10 @@ services:
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST}
       PUBLIC_IP: ${PUBLIC_IP}
+    # Compose no mira el contenido de los archivos montados: sin este hash (lo escribe
+    # deploy-mvp.sh en el .env), un cambio del Caddyfile no recrearía el gateway.
+    labels:
+      argos.caddyfile-sha256: ${CADDYFILE_SHA256:-}
     ports:
       - "80:80"
       - "443:443"
