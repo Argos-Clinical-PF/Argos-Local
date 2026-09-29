@@ -6,7 +6,8 @@
 GitHub Actions (OIDC) -> ECR -> SSM -> EC2 c7i.2xlarge
 Usuario -> HTTPS argosclinical.online -> CloudFront (+ AWS WAF) -> origin.argosclinical.online
         -> EIP -> Caddy -> Nginx frontend -> backend -> PostgreSQL
-                                                 \-> Whisper + emociones
+                                                 \-> emociones
+                                                 \-> enrutador de modelos -> host GPU o Whisper en CPU
 ```
 
 > **CloudFront está delante de todo desde el 2026-08-06.** `argosclinical.online` no resuelve al
@@ -45,7 +46,8 @@ Si falla con `Unable to locate credentials`, listar los perfiles disponibles con
 `aws configure list-profiles`.
 
 Terraform administra EC2/EIP, ECR, S3 operativo, SSM, IAM, CloudFront, la página de pausa, el
-grupo de logs y el rol OIDC `argos-github-actions`.
+grupo de logs, el rol OIDC `argos-github-actions` y el host de inferencia GPU
+([«Host de inferencia GPU»](#host-de-inferencia-gpu-adr-037)).
 
 ### Estado de Terraform
 
@@ -244,7 +246,8 @@ es el paciente.
 
 La bandera **sale de SSM, no de una variable de entorno**: el workflow de deploy invoca
 `deploy-mvp.sh` con una lista fija de variables —solo los tags y la región—, así que una variable
-de entorno nunca llegaría. Mismo patrón que `demo-gpu`.
+de entorno nunca llegaría. El host de inferencia GPU lee el mismo parámetro, y el mismo redeploy
+lo actualiza.
 
 ```bash
 aws ssm put-parameter --name /argos/mvp/diarizacion-enabled \
@@ -286,7 +289,10 @@ Para una demo:
    puede tardar entre cuatro y ocho minutos; `running` no significa todavía que
    la aplicación esté saludable.
 4. Abrir `https://32-193-249-170.sslip.io` solamente después del smoke test.
-5. Al terminar, ejecutar `Operate MVP` con acción `stop`.
+5. Al terminar, ejecutar `Operate MVP` con acción `stop`. Igual que Release MVP, antes consulta
+   `/api/health/deployment-safety`: con sesiones, cargas o jobs post-sesión activos, o si no puede
+   confirmarlo, falla sin detener nada. Esperar a que terminen, o relanzar con `forzar=true`
+   sabiendo que corta la sesión en vivo.
 
    ```bash
    gh workflow run operate.yml -f action=stop
@@ -337,7 +343,8 @@ confirmar el estado de la instancia.
 Con la EC2 detenida se mantienen únicamente EBS, EIP, ECR, S3 de bajo uso y el dominio. No hay
 costo fijo de ALB. CloudFront no tiene cargo fijo pero sí por request y transferencia, ambos
 despreciables al volumen actual. Antes y después de cada demo, confirmar que la instancia
-`argos-app` esté en estado `stopped`.
+`argos-app` esté en estado `stopped` y el host de inferencia GPU en `desired 0` (`Operate MVP`
+con `status`).
 
 ## Cómo se aplica un release
 
@@ -450,6 +457,7 @@ Bedrock que se cobra.
 | Envío del fragmento desde el navegador | espera 100 s | `GrabacionSesion.tsx` (frontend); el backend ya responde antes de 60 s |
 | Nota clínica y asistente | hasta 2 llamadas de 90 s (nota) o 60 s (asistente) | fijo en `ClienteClaudeIA` (backend); la regeneración pasa a segundo plano en otro cambio |
 | Proxy `/api/` de nginx | 180 s | `nginx.conf` del frontend; no limita, CloudFront corta antes |
+| Enrutador de modelos | sin límite | `Caddyfile.modelos`; los tiempos los pone el backend |
 
 ## Respaldos y recuperación
 
@@ -530,22 +538,112 @@ pasan a ser los más nuevos de `backups/`.
 
 Todavía no se hizo un simulacro cronometrado: la primera vez, anotar acá cuánto tardó cada camino.
 
-## Pasar a GPU (g6.2xlarge) y volver a CPU
+## Host de inferencia GPU (ADR-037)
 
-Requiere la cuota "Running On-Demand G and VT instances" en 8 o más (pedida el 25/09/2026). Con GPU,
-la transcripción en vivo usa large-v3-turbo y el pase post-sesión deja de tardar decenas de minutos.
-Precio mientras corre: 0,98 USD/h (CPU: 0,36 USD/h); se sigue deteniendo la instancia al terminar.
+La transcripción con GPU corre en una instancia aparte y sin estado, no en la de la app. El
+2026-09-29 pasar la app a g6.2xlarge falló durante 27 minutos por falta de capacidad en us-east-1a,
+y la app no puede salir de esa zona porque su disco tiene la base. La app sigue en c7i.2xlarge y un
+ASG (`argos-inferencia`, mínimo 0, máximo 1) lanza el host GPU en cualquier zona con capacidad,
+probando en orden g6.xlarge, g5.xlarge, g6.2xlarge y g4dn.xlarge.
 
-1. Detener la instancia y cambiar el tipo con Terraform (plan verificado: cambio en el lugar, la base
-   se conserva):
-   `cd terraform && TF_WORKSPACE=cuenta-nueva terraform apply -var demo_gpu=true`
-2. Encenderla y correr una sola vez, por SSM, `scripts/habilitar-gpu.sh` (driver NVIDIA y runtime de
-   contenedores). Termina mostrando `nvidia-smi`.
-3. `aws ssm put-parameter --name /argos/mvp/demo-gpu --value true --overwrite` (y, si se quiere otro
-   modelo en vivo, `/argos/mvp/whisper-model-gpu`).
-4. Redesplegar el bundle (`deploy.yml`, service=bundle). El overlay `docker-compose.gpu.yml` usa la
-   imagen de transcripción con sufijo `-gpu`.
+```text
+backend -> enrutador-modelos (Caddy :9100, interno, Caddyfile.modelos)
+             1.º inferencia.argos.internal:9000   host GPU: large-v3-turbo en cuda, vivo y refinamiento
+             2.º transcripcion:9000               CPU de la app, igual que antes
+```
 
-Para volver a CPU: parámetro `demo-gpu=false`, `terraform apply -var demo_gpu=false` y redesplegar.
-El driver instalado no molesta en una instancia sin GPU.
+- **Cómo elige el enrutador.** Consulta el `/health` de los dos cada 5 s y manda cada pedido al host
+  GPU mientras responda `"estado":"ok"`. Si no (sin capacidad, arrancando, cargando el modelo,
+  apagado o caído), a la CPU de la app. Cuando el host desaparece, los pedidos que lo encuentran o
+  que estaban en curso en él vuelven 502 (a los 3 s si el registro DNS quedó apuntando a una IP sin
+  host), y el host queda afuera 30 s aunque vuelva antes. El backend reintenta los fragmentos en vivo
+  (ese reintento y los siguientes van a la CPU), pero no el refinamiento post-sesión: la grabación
+  queda en ERROR y la sesión sigue con la transcripción en vivo y, si era presencial con diarización,
+  sin agrupamiento de voces. El enrutador no corta pedidos largos: un refinamiento tarda lo que
+  necesite.
+- **Qué guarda.** Nada. El audio se procesa en memoria, el disco (cifrado con la clave `aws/ebs`,
+  como el de la app) se borra al terminar la instancia y los datos clínicos siguen solo en la app. El
+  tráfico entre la app y el host no sale de la VPC y va entre instancias Nitro, que lo cifran solas.
+- **La GPU no factura sola más de 10 minutos.** Un vigía en el host (`argos-inferencia-vigia.timer`,
+  cada 5 minutos) baja el ASG a 0 si ve la app sin correr en dos lecturas seguidas de la API. Una
+  lectura fallida no cuenta: un error de la API nunca apaga el host.
 
+### Puesta en marcha (una vez)
+
+1. Quitar `demo_gpu` y `gpu_instance_type` del `terraform.tfvars` local: esas variables ya no
+   existen. Después, `terraform apply` (workspace `cuenta-nueva`): crea la zona privada
+   `argos.internal`, el grupo de seguridad, el rol, la plantilla de lanzamiento y el ASG en 0, y suma
+   al rol de GitHub Actions los permisos para encenderlo y apagarlo. No cuesta nada hasta encenderlo.
+   Va primero para que los workflows ya tengan esos permisos cuando llegue el paso 2.
+2. `Argos-Local` a `main`: despliega el enrutador. Con el ASG en 0 todo corre en CPU como antes.
+3. Para cada tag de transcripción tiene que existir en ECR la variante `argos-transcripcion:<tag>-gpu`,
+   que publica la CI de Argos-Entrenamiento junto con la de CPU.
+
+### Operación
+
+```bash
+gh workflow run operate.yml -f action=start              # app y host GPU
+gh workflow run operate.yml -f action=start -f gpu=false # solo CPU
+gh workflow run operate.yml -f action=status             # tipo, zona y salud vista desde el enrutador
+gh workflow run operate.yml -f action=stop               # sin trabajo clínico activo: detiene la app y baja el ASG a 0
+```
+
+`start` pide el host antes de arrancar la app y espera hasta 10 minutos a que quede en servicio. Si no
+hay capacidad GPU en ninguna zona, el run termina en verde con un aviso y la transcripción sigue en
+CPU; el ASG sigue intentando solo. El host tarda unos minutos más en cargar el modelo, y hasta que su
+`/health` responda `ok` el enrutador usa la CPU.
+
+Para forzar CPU con la app encendida (por ejemplo, para comparar), bajar el host a mano. Nunca con
+un refinamiento post-sesión en curso: el que esté corriendo en el host se pierde (los fragmentos en
+vivo, en cambio, se reintentan contra la CPU). Lo más simple es bajarlo antes de empezar la sesión,
+después de confirmar `"seguro":true` con la misma consulta que usa Release MVP
+(`docker exec argos-backend wget -qO- http://localhost:8080/api/health/deployment-safety`, por SSM
+en `argos-app`):
+
+```bash
+aws autoscaling set-desired-capacity --auto-scaling-group-name argos-inferencia --desired-capacity 0
+```
+
+### Deploys
+
+`Release MVP` despliega la app como siempre. Si el servicio es `bundle` o `entrenamiento` (o es un
+rollback) y el host GPU está en servicio, corre en él por SSM `/usr/local/bin/argos-inferencia-actualizar`:
+relee el manifiesto recién promovido y recrea el contenedor solo si cambió la imagen de transcripción
+o el parámetro `/argos/mvp/diarizacion-enabled`. Si la variante `-gpu` del tag nuevo no existe, saca
+la versión anterior para no mezclar versiones, el enrutador usa la CPU y el run solo avisa. Un host
+nuevo toma el manifiesto vigente al arrancar. Cuando Release MVP detiene la app al terminar, también
+baja el ASG a 0; si eso falla, el vigía baja el host entre 5 y 10 minutos después.
+
+Los valores del servicio de transcripción del host GPU están en `scripts/inferencia-actualizar.sh`, no
+en el `.env` de la app: un cambio de esos valores en `deploy-mvp.sh` va también ahí. El user data
+(`scripts/inferencia-arranque.sh`, que incluye ese script) llega a las instancias nuevas después de un
+`terraform apply`.
+
+### Modelos
+
+El primer arranque baja large-v3-turbo (unos 1,6 GB) de Hugging Face y, ya cargado, lo sube a
+`s3://argos-mvp-operacion-616322963974/modelos/huggingface/`. Los siguientes arranques lo toman de
+ahí y no dependen de Hugging Face. Para forzar una descarga nueva, borrar ese prefijo. El encoder de
+voces y el VAD vienen dentro de la imagen.
+
+### Logs
+
+```bash
+# El contenedor del host GPU
+aws logs tail /argos/mvp --log-stream-name-prefix inferencia/ --since 2h --follow
+
+# El arranque, el vigía y la GPU, por Session Manager
+INSTANCIA=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names argos-inferencia \
+  --query 'AutoScalingGroups[0].Instances[0].InstanceId' --output text)
+aws ssm start-session --target "$INSTANCIA"
+#   sudo tail -100 /var/log/argos-inferencia.log
+#   journalctl -u argos-inferencia-vigia --since today
+#   nvidia-smi
+```
+
+### Costo
+
+Mientras corre, además de la c7i.2xlarge (0,357 USD/h): g6.xlarge 0,805 USD/h, g5.xlarge 1,006,
+g6.2xlarge 0,978 o g4dn.xlarge 0,526 (on-demand en us-east-1, septiembre de 2026), más su disco, que
+se borra con la instancia. Con el ASG en 0 quedan solo la zona privada (0,50 USD por mes) y los
+modelos en S3.

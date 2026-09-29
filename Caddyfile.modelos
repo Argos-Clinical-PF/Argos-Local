@@ -1,0 +1,33 @@
+# Enrutador interno de modelos (ADR-037). El backend le manda la transcripción y Caddy elige:
+# el host de inferencia GPU mientras su /health diga "estado":"ok", y si no (sin capacidad, todavía
+# cargando, apagado o caído) la transcripción en CPU de esta misma instancia. No publica puertos.
+{
+	admin off
+}
+
+http://:9100 {
+	reverse_proxy inferencia.argos.internal:9000 transcripcion:9000 {
+		lb_policy first
+
+		health_uri /health
+		health_body `"estado"\s*:\s*"ok"`
+		health_interval 5s
+		health_timeout 3s
+
+		# Una falla de conexión saca al host 30 s sin esperar el próximo chequeo: solo vuelven 502 el
+		# pedido que la encontró y los que estaban en curso. El backend reintenta los fragmentos en
+		# vivo, no el refinamiento post-sesión. No hay reintento en el proxy: el cuerpo ya consumido
+		# no se puede reenviar, y esa falla quedaría anotada contra la CPU.
+		fail_duration 30s
+
+		# El refinamiento post-sesión puede tardar minutos en CPU: el proxy no corta la espera.
+		# keepalive por debajo de los 5 s de uvicorn: reusar una conexión que el servicio ya cerró
+		# devolvería 502 a un POST, que no se puede reintentar.
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 0
+			read_timeout 0
+			keepalive 4s
+		}
+	}
+}
