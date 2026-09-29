@@ -564,9 +564,9 @@ backend -> enrutador-modelos (Caddy :9100, interno, Caddyfile.modelos)
 - **Qué guarda.** Nada. El audio se procesa en memoria, el disco (cifrado con la clave `aws/ebs`,
   como el de la app) se borra al terminar la instancia y los datos clínicos siguen solo en la app. El
   tráfico entre la app y el host no sale de la VPC y va entre instancias Nitro, que lo cifran solas.
-- **La GPU nunca factura sola.** Un vigía en el host (`argos-inferencia-vigia.timer`, cada 5 minutos)
-  baja el ASG a 0 si ve la app sin correr en dos lecturas seguidas de la API. Una lectura fallida no
-  cuenta: un error de la API nunca apaga el host.
+- **La GPU no factura sola más de 10 minutos.** Un vigía en el host (`argos-inferencia-vigia.timer`,
+  cada 5 minutos) baja el ASG a 0 si ve la app sin correr en dos lecturas seguidas de la API. Una
+  lectura fallida no cuenta: un error de la API nunca apaga el host.
 
 ### Puesta en marcha (una vez)
 
@@ -610,7 +610,8 @@ rollback) y el host GPU está en servicio, corre en él por SSM `/usr/local/bin/
 relee el manifiesto recién promovido y recrea el contenedor solo si cambió la imagen de transcripción
 o el parámetro `/argos/mvp/diarizacion-enabled`. Si la variante `-gpu` del tag nuevo no existe, saca
 la versión anterior para no mezclar versiones, el enrutador usa la CPU y el run solo avisa. Un host
-nuevo toma el manifiesto vigente al arrancar.
+nuevo toma el manifiesto vigente al arrancar. Cuando Release MVP detiene la app al terminar, no toca
+el ASG: el vigía baja el host entre 5 y 10 minutos después.
 
 Los valores del servicio de transcripción del host GPU están en `scripts/inferencia-actualizar.sh`, no
 en el `.env` de la app: un cambio de esos valores en `deploy-mvp.sh` va también ahí. El user data

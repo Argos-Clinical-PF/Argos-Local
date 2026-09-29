@@ -41,7 +41,8 @@ chmod 644 /etc/argos-inferencia.env
 # shellcheck source=/dev/null
 . /etc/argos-inferencia.env
 
-# Primero el vigía, antes de cualquier paso que pueda fallar: la GPU nunca factura sin la app.
+# Primero el vigía, antes de cualquier paso que pueda fallar: la GPU no factura sin la app más de
+# 10 minutos.
 # Baja el ASG a 0 solo con dos lecturas seguidas y exitosas de la API que muestran la app sin
 # correr; una lectura fallida reinicia la cuenta en vez de sumar.
 cat > /usr/local/bin/argos-inferencia-vigia <<'EOS'
