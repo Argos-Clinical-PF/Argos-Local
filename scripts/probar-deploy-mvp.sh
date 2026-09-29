@@ -58,7 +58,7 @@ chmod +x "$TMP/bin/docker" "$TMP/bin/aws"
 # Como en la instancia: el workflow deja el bundle en entrante/ y la app tiene el release anterior.
 mkdir -p "$TMP/entrante"
 cp "$DEPLOY" "$RAIZ/scripts/refresh-ip-certificate.sh" "$RAIZ/docker-compose.prod.yml" \
-  "$RAIZ/docker-compose.gpu.yml" "$RAIZ/Caddyfile" "$TMP/entrante/"
+  "$RAIZ/docker-compose.gpu.yml" "$RAIZ/Caddyfile" "$RAIZ/Caddyfile.modelos" "$TMP/entrante/"
 
 correr_deploy() {
   rm -rf "$TMP/llamadas" "$TMP/paso-el-gate" "$TMP/aplicado-antes-de-aws" "$TMP/salida" "$TMP/app"

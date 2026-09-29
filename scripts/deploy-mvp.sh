@@ -34,7 +34,7 @@ fi
 ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ "$ORIGEN" != "$APP_DIR" ]; then
   mkdir -p "$APP_DIR"
-  cp "$ORIGEN"/docker-compose.prod.yml "$ORIGEN"/Caddyfile "$ORIGEN"/deploy-mvp.sh "$ORIGEN"/refresh-ip-certificate.sh "$APP_DIR"/
+  cp "$ORIGEN"/docker-compose.prod.yml "$ORIGEN"/Caddyfile "$ORIGEN"/Caddyfile.modelos "$ORIGEN"/deploy-mvp.sh "$ORIGEN"/refresh-ip-certificate.sh "$APP_DIR"/
   cp "$ORIGEN"/docker-compose.gpu.yml "$APP_DIR"/ 2>/dev/null || true
   chmod 700 "$APP_DIR"/deploy-mvp.sh "$APP_DIR"/refresh-ip-certificate.sh
 fi
@@ -184,6 +184,7 @@ umask 077
   printf 'ARGOS_DIARIZACION_ENABLED=%s\n' "$DIARIZACION_ENABLED"
   printf 'ARGOS_ESPERA_ASIGNACION_HORAS=%s\n' "$ESPERA_ASIGNACION_HORAS"
   printf 'CADDYFILE_SHA256=%s\n' "$(sha256sum Caddyfile | cut -d' ' -f1)"
+  printf 'CADDYFILE_MODELOS_SHA256=%s\n' "$(sha256sum Caddyfile.modelos | cut -d' ' -f1)"
 } > .env
 
 COMPOSE_FILES=(-f docker-compose.prod.yml)
@@ -304,8 +305,8 @@ systemctl enable --now argos-respaldo-base.timer argos-vigia.timer
 /usr/local/bin/argos-respaldo-base || echo "Aviso: el respaldo previo al despliegue falló; se continúa."
 docker logout "$ECR_REGISTRY" >/dev/null
 # Sin `down`: compose recrea solo los servicios cuya imagen o configuración cambió, así que un
-# release del frontend no reinicia Postgres ni los modelos. El hash del Caddyfile va como label
-# del gateway para que un cambio de ese archivo también lo recree. Si vuelve a aparecer el error
+# release del frontend no reinicia Postgres ni los modelos. El hash de cada Caddyfile va como label
+# del gateway y del enrutador de modelos para que un cambio de ese archivo también lo recree. Si vuelve a aparecer el error
 # de referencias a contenedores ya eliminados que motivó el `down`, usar --force-recreate acotado
 # al servicio afectado, no el stack entero.
 docker compose "${COMPOSE_FILES[@]}" --env-file .env up -d --remove-orphans

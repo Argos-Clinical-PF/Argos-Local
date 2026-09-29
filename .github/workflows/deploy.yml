@@ -44,6 +44,7 @@ on:
     branches: [main]
     paths:
       - Caddyfile
+      - Caddyfile.modelos
       - docker-compose.gpu.yml
       - docker-compose.prod.yml
       - scripts/deploy-mvp.sh
@@ -200,6 +201,7 @@ jobs:
             aws s3 cp "$SOURCE/docker-compose.prod.yml" "$PREFIX/docker-compose.prod.yml"
             aws s3 cp "$SOURCE/docker-compose.gpu.yml" "$PREFIX/docker-compose.gpu.yml" || true
             aws s3 cp "$SOURCE/Caddyfile" "$PREFIX/Caddyfile"
+            aws s3 cp "$SOURCE/Caddyfile.modelos" "$PREFIX/Caddyfile.modelos" || true
             aws s3 cp "$SOURCE/deploy-mvp.sh" "$PREFIX/deploy-mvp.sh"
             if ! aws s3 cp "$SOURCE/refresh-ip-certificate.sh" "$PREFIX/refresh-ip-certificate.sh"; then
               echo "La release historica no contiene el renovador IP; usando la version compatible actual."
@@ -209,6 +211,7 @@ jobs:
             aws s3 cp docker-compose.prod.yml "$PREFIX/docker-compose.prod.yml"
             aws s3 cp docker-compose.gpu.yml "$PREFIX/docker-compose.gpu.yml"
             aws s3 cp Caddyfile "$PREFIX/Caddyfile"
+            aws s3 cp Caddyfile.modelos "$PREFIX/Caddyfile.modelos"
             aws s3 cp scripts/deploy-mvp.sh "$PREFIX/deploy-mvp.sh"
             aws s3 cp scripts/refresh-ip-certificate.sh "$PREFIX/refresh-ip-certificate.sh"
           fi
@@ -305,6 +308,7 @@ jobs:
               "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/entrante/docker-compose.prod.yml",
               "aws s3 cp \($prefix)/docker-compose.gpu.yml /home/ec2-user/argos/entrante/docker-compose.gpu.yml || true",
               "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/entrante/Caddyfile",
+              "aws s3 cp \($prefix)/Caddyfile.modelos /home/ec2-user/argos/entrante/Caddyfile.modelos || true",
               "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/entrante/deploy-mvp.sh",
               "aws s3 cp \($prefix)/refresh-ip-certificate.sh /home/ec2-user/argos/entrante/refresh-ip-certificate.sh",
               "chmod 700 /home/ec2-user/argos/entrante/deploy-mvp.sh",
@@ -414,6 +418,7 @@ jobs:
               "aws s3 cp \($prefix)/docker-compose.prod.yml /home/ec2-user/argos/docker-compose.prod.yml",
               "aws s3 cp \($prefix)/docker-compose.gpu.yml /home/ec2-user/argos/docker-compose.gpu.yml || true",
               "aws s3 cp \($prefix)/Caddyfile /home/ec2-user/argos/Caddyfile",
+              "aws s3 cp \($prefix)/Caddyfile.modelos /home/ec2-user/argos/Caddyfile.modelos || true",
               "aws s3 cp \($prefix)/deploy-mvp.sh /home/ec2-user/argos/deploy-mvp.sh",
               "aws s3 cp \($prefix)/refresh-ip-certificate.sh /home/ec2-user/argos/refresh-ip-certificate.sh || true",
               "chmod 700 /home/ec2-user/argos/deploy-mvp.sh /home/ec2-user/argos/refresh-ip-certificate.sh",
