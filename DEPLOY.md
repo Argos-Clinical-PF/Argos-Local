@@ -289,7 +289,10 @@ Para una demo:
    puede tardar entre cuatro y ocho minutos; `running` no significa todavía que
    la aplicación esté saludable.
 4. Abrir `https://32-193-249-170.sslip.io` solamente después del smoke test.
-5. Al terminar, ejecutar `Operate MVP` con acción `stop`.
+5. Al terminar, ejecutar `Operate MVP` con acción `stop`. Igual que Release MVP, antes consulta
+   `/api/health/deployment-safety`: con sesiones, cargas o jobs post-sesión activos, o si no puede
+   confirmarlo, falla sin detener nada. Esperar a que terminen, o relanzar con `forzar=true`
+   sabiendo que corta la sesión en vivo.
 
    ```bash
    gh workflow run operate.yml -f action=stop
@@ -578,7 +581,7 @@ backend -> enrutador-modelos (Caddy :9100, interno, Caddyfile.modelos)
 gh workflow run operate.yml -f action=start              # app y host GPU
 gh workflow run operate.yml -f action=start -f gpu=false # solo CPU
 gh workflow run operate.yml -f action=status             # tipo, zona y salud vista desde el enrutador
-gh workflow run operate.yml -f action=stop               # detiene la app y baja el ASG a 0
+gh workflow run operate.yml -f action=stop               # sin trabajo clínico activo: detiene la app y baja el ASG a 0
 ```
 
 `start` pide el host antes de arrancar la app y espera hasta 10 minutos a que quede en servicio. Si no

@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: true
+      forzar:
+        description: Con stop, detener aunque haya sesiones, cargas o jobs post-sesión activos (corta la sesión en vivo)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -129,6 +134,44 @@ jobs:
           done
           echo "::warning::El host GPU no quedó en servicio en 10 minutos (¿sin capacidad?); la transcripción sigue en la CPU de la app y el ASG sigue intentando."
 
+      # El mismo gate que Release MVP antes de apagar: detener la app corta la sesión en vivo y los
+      # jobs post-sesión, y bajar el host GPU pierde el refinamiento que esté corriendo en él.
+      - name: Verificar apagado seguro
+        id: seguridad
+        if: inputs.action == 'stop' && !inputs.forzar
+        run: |
+          INSTANCE_ID="${{ steps.aws.outputs.instance_id }}"
+          ESTADO=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text)
+          if [ "$ESTADO" != "running" ]; then
+            echo "La app está $ESTADO: no hay trabajo clínico que proteger."
+            exit 0
+          fi
+          PARAMETERS=$(jq -cn '{commands:[
+            "docker exec argos-backend wget -qO- http://localhost:8080/api/health/deployment-safety"
+          ]}')
+          SALIDA=""
+          if COMMAND_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript --parameters "$PARAMETERS" \
+            --query 'Command.CommandId' --output text); then
+            for _ in $(seq 1 30); do
+              ESTADO=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
+                --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || true)
+              if [ "$ESTADO" = "Success" ]; then
+                SALIDA=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
+                  --instance-id "$INSTANCE_ID" --query StandardOutputContent --output text)
+                echo "$SALIDA"
+                break
+              fi
+              case "$ESTADO" in Failed|Cancelled|TimedOut) break ;; esac
+              sleep 2
+            done
+          fi
+          if ! echo "$SALIDA" | grep -q '"seguro":true'; then
+            echo "::error::No se detuvo nada: hay sesiones, cargas o jobs post-sesión activos, o no se pudo confirmar que no los haya. Reintentar cuando terminen, o relanzar con forzar=true sabiendo que corta la sesión en vivo."
+            exit 1
+          fi
+
       - name: Detener
         if: inputs.action == 'stop'
         run: |
@@ -138,10 +181,11 @@ jobs:
             aws ec2 stop-instances --instance-ids "${{ steps.aws.outputs.instance_id }}"
           fi
 
-      # Aunque falle el paso anterior: la GPU no debe quedar facturando sola. Si esto tampoco anda,
-      # el vigía del host la baja a los 10 minutos como mucho de ver la app detenida.
+      # Aunque falle el paso anterior, pero no si el gate frenó el apagado: la GPU no debe quedar
+      # facturando sola. Si esto tampoco anda, el vigía del host la baja a los 10 minutos como mucho
+      # de ver la app detenida.
       - name: Apagar host de inferencia GPU
-        if: always() && inputs.action == 'stop'
+        if: always() && inputs.action == 'stop' && (steps.seguridad.outcome == 'success' || inputs.forzar)
         run: |
           EXISTE=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names argos-inferencia \
             --query 'length(AutoScalingGroups)' --output text)
