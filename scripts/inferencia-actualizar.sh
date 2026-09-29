@@ -17,6 +17,10 @@ flock 9
 . /etc/argos-inferencia.env
 REGISTRO="${REPOSITORIO%%/*}"
 CONTENEDOR=argos-transcripcion
+# Refinamiento post-sesión con large-v3 completo: en la GPU (FLEURS es_419, 80 audios, 2026-09-29) tiene
+# menos errores que large-v3-turbo (2,52 % contra 2,94 % limpio; 2,78 % contra 3,16 % con ruido) y tarda
+# 0,05 de la duración del audio. En vivo sigue large-v3-turbo, que responde en unos 0,2 s por fragmento.
+MODELO_REFINAMIENTO=large-v3
 CACHE=/var/lib/argos/hf-cache
 
 log() { echo "$(date -u +%FT%TZ) argos-inferencia-actualizar: $*" >&2; }
@@ -73,7 +77,7 @@ MANIFIESTO="$(reintentar 5 10 aws s3 cp "s3://$BUCKET/deploy/manifests/current.j
 TAG="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["transcripcion"])' <<<"$MANIFIESTO")"
 IMAGEN="$REPOSITORIO:$TAG-gpu"
 DIARIZACION="$(reintentar 5 5 leer_diarizacion)"
-CONFIGURACION="$IMAGEN diarizacion=$DIARIZACION"
+CONFIGURACION="$IMAGEN diarizacion=$DIARIZACION refinamiento=$MODELO_REFINAMIENTO"
 
 ACTUAL="$(docker inspect -f '{{ index .Config.Labels "argos.configuracion" }}' "$CONTENEDOR" 2>/dev/null || true)"
 if [ "$ACTUAL" = "$CONFIGURACION" ] \
@@ -98,8 +102,9 @@ fi
 reintentar 30 10 gpu_lista
 
 # Mismo entorno que el servicio transcripcion de docker-compose.prod.yml con el .env de
-# deploy-mvp.sh; solo cambian el modelo y el dispositivo. Un solo modelo en VRAM: el refinamiento
-# post-sesión usa el mismo que el vivo. Si cambia un valor allá, cambiarlo también acá.
+# deploy-mvp.sh; solo cambian los modelos y el dispositivo. El de refinamiento se carga en el primer
+# refinamiento y convive con el de vivo en la memoria de la GPU. Si cambia un valor allá, cambiarlo
+# también acá.
 # El /tmp del contenedor va en memoria: Starlette pasa a un archivo temporal toda subida de más de
 # 1 MB, y el refinamiento manda el audio entero de la sesión.
 docker rm -f "$CONTENEDOR" >/dev/null 2>&1 || true
@@ -119,7 +124,7 @@ docker run -d --name "$CONTENEDOR" --restart unless-stopped --gpus all -p 9000:9
   --health-interval 15s --health-timeout 10s --health-retries 30 --health-start-period 180s \
   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
   -e WHISPER_MODEL=large-v3-turbo \
-  -e WHISPER_REFINEMENT_MODEL=large-v3-turbo \
+  -e WHISPER_REFINEMENT_MODEL="$MODELO_REFINAMIENTO" \
   -e WHISPER_DEVICE=cuda \
   -e WHISPER_COMPUTE_TYPE=float16 \
   -e DIARIZACION_ENABLED="$DIARIZACION" \
