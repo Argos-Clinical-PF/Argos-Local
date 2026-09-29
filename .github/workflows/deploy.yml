@@ -378,6 +378,39 @@ jobs:
           fi
           aws s3 cp candidate.json "$CURRENT"
 
+      # ADR-037. El host GPU relee el manifiesto recién promovido y recrea su contenedor solo si
+      # cambió la imagen de transcripción o la bandera de diarización. No frena el release: si
+      # falla, el enrutador de la app sigue mandando la transcripción a la CPU.
+      - name: Actualizar host de inferencia GPU
+        if: (inputs.action || 'deploy') == 'rollback' || contains(fromJSON('["bundle","entrenamiento"]'), inputs.service || 'bundle')
+        run: |
+          INSTANCIA=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names argos-inferencia \
+            --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId | [0]" \
+            --output text 2>/dev/null || true)
+          if [ -z "$INSTANCIA" ] || [ "$INSTANCIA" = "None" ]; then
+            echo "El host de inferencia GPU no está en servicio; no hay nada que actualizar."
+            exit 0
+          fi
+          PARAMETERS=$(jq -cn '{commands:["/usr/local/bin/argos-inferencia-actualizar"]}')
+          if ! COMMAND_ID=$(aws ssm send-command --instance-ids "$INSTANCIA" \
+            --document-name AWS-RunShellScript --parameters "$PARAMETERS" \
+            --query 'Command.CommandId' --output text); then
+            echo "::warning::No se pudo mandar la actualización al host GPU $INSTANCIA; la transcripción sigue en la CPU de la app."
+            exit 0
+          fi
+          ESTADO=""
+          for _ in $(seq 1 120); do
+            ESTADO=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCIA" --query Status --output text 2>/dev/null || true)
+            case "$ESTADO" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 10
+          done
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCIA" \
+            --query '[StandardOutputContent,StandardErrorContent]' --output text || true
+          if [ "$ESTADO" != "Success" ]; then
+            echo "::warning::El host GPU no quedó actualizado (estado ${ESTADO:-desconocido}); el enrutador usa la CPU de la app."
+          fi
+
       # Un deploy que no pasa el smoke test deja producción rota hasta que alguien lo note. Se
       # vuelve solo al último manifiesto promovido (current.json no cambió) con su propio bundle,
       # y el job igual termina en rojo para que se vea.
