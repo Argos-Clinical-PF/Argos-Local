@@ -95,9 +95,12 @@ reintentar 30 10 gpu_lista
 # Mismo entorno que el servicio transcripcion de docker-compose.prod.yml con el .env de
 # deploy-mvp.sh; solo cambian el modelo y el dispositivo. Un solo modelo en VRAM: el refinamiento
 # post-sesión usa el mismo que el vivo. Si cambia un valor allá, cambiarlo también acá.
+# El /tmp del contenedor va en memoria: Starlette pasa a un archivo temporal toda subida de más de
+# 1 MB, y el refinamiento manda el audio entero de la sesión.
 docker rm -f "$CONTENEDOR" >/dev/null 2>&1 || true
 docker run -d --name "$CONTENEDOR" --restart unless-stopped --gpus all -p 9000:9000 \
   -v "$CACHE":/root/.cache/huggingface \
+  --tmpfs /tmp:rw,nosuid,nodev,size=1g \
   --label "argos.configuracion=$CONFIGURACION" \
   --log-driver awslogs \
   --log-opt awslogs-region="$REGION" \
