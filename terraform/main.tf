@@ -35,11 +35,6 @@ data "aws_ssm_parameter" "dlami_gpu_al2023" {
   name = "/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-amazon-linux-2023/latest/ami-id"
 }
 
-locals {
-  ami_id        = var.demo_gpu ? data.aws_ssm_parameter.dlami_gpu_al2023.value : data.aws_ami.al2023.id
-  instance_type = var.demo_gpu ? var.gpu_instance_type : var.instance_type
-}
-
 resource "aws_ecr_repository" "repos" {
   for_each             = toset(["argos-backend", "argos-frontend", "argos-transcripcion", "argos-emociones"])
   name                 = each.value
@@ -97,8 +92,8 @@ resource "aws_security_group" "ec2" {
 }
 
 resource "aws_instance" "app" {
-  ami                         = local.ami_id
-  instance_type               = local.instance_type
+  ami                         = data.aws_ami.al2023.id
+  instance_type               = var.instance_type
   subnet_id                   = data.aws_subnets.default.ids[0]
   vpc_security_group_ids      = [aws_security_group.ec2.id]
   iam_instance_profile        = aws_iam_instance_profile.ec2.name
@@ -123,12 +118,12 @@ resource "aws_instance" "app" {
 
   tags = {
     Name        = "argos-app"
-    ComputeMode = var.demo_gpu ? "gpu-demo" : "cpu"
+    ComputeMode = "cpu"
   }
 
   lifecycle {
-    # La AMI latest solo se adopta en una recreacion explicitamente revisada.
-    # Para cambiar CPU/GPU usar -replace; nunca destruir el host por drift diario.
+    # La AMI latest solo se adopta en una recreacion explicitamente revisada; nunca destruir el
+    # host por drift diario. La GPU no va en esta instancia sino en el host de inferencia (ADR-037).
     ignore_changes = [ami]
   }
 

@@ -4,10 +4,6 @@ profile       = "argos-nuevos"
 region        = "us-east-1"
 instance_type = "c7i.2xlarge"
 
-# Modo demo IA con GPU. Requiere cuota EC2 G/VT aprobada antes de aplicar.
-demo_gpu         = false
-gpu_instance_type = "g6.2xlarge"
-
 domain_name = "argosclinical.online"
 
 # WebACL propio asociado a CloudFront. Apagado por defecto: cuesta del orden de USD 9/mes.

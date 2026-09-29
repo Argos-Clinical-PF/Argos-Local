@@ -35,7 +35,6 @@ ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ "$ORIGEN" != "$APP_DIR" ]; then
   mkdir -p "$APP_DIR"
   cp "$ORIGEN"/docker-compose.prod.yml "$ORIGEN"/Caddyfile "$ORIGEN"/Caddyfile.modelos "$ORIGEN"/deploy-mvp.sh "$ORIGEN"/refresh-ip-certificate.sh "$APP_DIR"/
-  cp "$ORIGEN"/docker-compose.gpu.yml "$APP_DIR"/ 2>/dev/null || true
   chmod 700 "$APP_DIR"/deploy-mvp.sh "$APP_DIR"/refresh-ip-certificate.sh
 fi
 
@@ -75,24 +74,6 @@ DIARIZACION_ENABLED="${DIARIZACION_ENABLED:-false}"
 ESPERA_ASIGNACION_HORAS="$(get_parameter_optional espera-asignacion-horas)"
 ESPERA_ASIGNACION_HORAS="${ESPERA_ASIGNACION_HORAS:-24}"
 
-DEMO_GPU="$(get_parameter_optional demo-gpu)"
-DEMO_GPU="${DEMO_GPU:-false}"
-if [ "$DEMO_GPU" = "true" ]; then
-  if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi >/dev/null 2>&1; then
-    echo "DEMO_GPU=true pero nvidia-smi no esta disponible. Revisar cuota/AMI/runtime NVIDIA."
-    exit 1
-  fi
-  WHISPER_MODEL_VALUE="$(get_parameter_optional whisper-model-gpu)"
-  # En GPU large-v3-turbo entra en vivo con margen (en CPU solo small cumple la latencia).
-  WHISPER_MODEL_VALUE="${WHISPER_MODEL_VALUE:-large-v3-turbo}"
-  WHISPER_DEVICE_VALUE="cuda"
-  WHISPER_COMPUTE_VALUE="float16"
-else
-  WHISPER_MODEL_VALUE="$(get_parameter whisper-model)"
-  WHISPER_DEVICE_VALUE="cpu"
-  WHISPER_COMPUTE_VALUE="int8"
-fi
-
 umask 077
 {
   printf 'ECR_REGISTRY=%s\n' "$ECR_REGISTRY"
@@ -123,9 +104,11 @@ umask 077
   printf 'MAIL_USERNAME=%s\n' "$(get_parameter mail-username)"
   printf 'MAIL_PASSWORD=%s\n' "$(get_parameter mail-password)"
   printf 'MAIL_FROM=%s\n' "$(get_parameter mail-username)"
-  printf 'WHISPER_MODEL=%s\n' "$WHISPER_MODEL_VALUE"
-  printf 'WHISPER_DEVICE=%s\n' "$WHISPER_DEVICE_VALUE"
-  printf 'WHISPER_COMPUTE_TYPE=%s\n' "$WHISPER_COMPUTE_VALUE"
+  # Transcripción en CPU de la app. El host de inferencia GPU corre la misma con otro modelo y
+  # dispositivo: un cambio de estos valores va también en scripts/inferencia-actualizar.sh.
+  printf 'WHISPER_MODEL=%s\n' "$(get_parameter whisper-model)"
+  printf 'WHISPER_DEVICE=cpu\n'
+  printf 'WHISPER_COMPUTE_TYPE=int8\n'
   printf 'WHISPER_IDIOMA=es\n'
   printf 'WHISPER_BEAM_SIZE=3\n'
   printf 'WHISPER_REFINEMENT_BEAM_SIZE=5\n'
@@ -177,7 +160,7 @@ umask 077
   # invoca este script con una lista fija de variables -solo los tags y la region-, asi que una
   # variable de entorno nunca llegaria y la bandera quedaria clavada en false.
   #
-  # Mismo patron que demo-gpu. Encender sin tocar codigo ni workflow:
+  # Encender sin tocar codigo ni workflow:
   #   aws ssm put-parameter --name /argos/mvp/diarizacion-enabled --value true --type String --overwrite
   # y volver a desplegar. Este .env se regenera entero en cada deploy, asi que editarlo a mano en la
   # instancia no sobrevive al siguiente.
@@ -188,9 +171,6 @@ umask 077
 } > .env
 
 COMPOSE_FILES=(-f docker-compose.prod.yml)
-if [ "$DEMO_GPU" = "true" ]; then
-  COMPOSE_FILES+=(-f docker-compose.gpu.yml)
-fi
 
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$ECR_REGISTRY"

@@ -46,16 +46,6 @@ variable "instance_type" {
   default = "c7i.2xlarge"
 }
 
-variable "demo_gpu" {
-  description = "Activa perfil demo con AMI GPU y compose overlay CUDA."
-  default     = false
-}
-
-variable "gpu_instance_type" {
-  description = "Instancia GPU para demos. Requiere cuota EC2 G/VT aprobada."
-  default     = "g6.2xlarge"
-}
-
 variable "domain_name" {
   description = "Dominio publico canonico de ARGOS Clinical."
   type        = string
