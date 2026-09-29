@@ -572,9 +572,10 @@ backend -> enrutador-modelos (Caddy :9100, interno, Caddyfile.modelos)
 
 1. `Argos-Local` a `main`: despliega el enrutador. Con el ASG en 0, o todavía sin el ASG, todo corre
    en CPU como antes. Hasta el `terraform apply`, Operate MVP solo avisa que no encuentra el ASG.
-2. `terraform apply` (workspace `cuenta-nueva`): crea la zona privada `argos.internal`, el grupo de
-   seguridad, el rol, la plantilla de lanzamiento y el ASG en 0, y suma al rol de GitHub Actions los
-   permisos para encenderlo y apagarlo. No cuesta nada hasta encenderlo.
+2. Quitar `demo_gpu` y `gpu_instance_type` del `terraform.tfvars` local: esas variables ya no
+   existen. Después, `terraform apply` (workspace `cuenta-nueva`): crea la zona privada
+   `argos.internal`, el grupo de seguridad, el rol, la plantilla de lanzamiento y el ASG en 0, y suma
+   al rol de GitHub Actions los permisos para encenderlo y apagarlo. No cuesta nada hasta encenderlo.
 3. Para cada tag de transcripción tiene que existir en ECR la variante `argos-transcripcion:<tag>-gpu`,
    que publica la CI de Argos-Entrenamiento junto con la de CPU.
 
