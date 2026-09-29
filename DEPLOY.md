@@ -568,7 +568,7 @@ backend -> enrutador-modelos (Caddy :9100, interno, Caddyfile.modelos)
 ### Puesta en marcha (una vez)
 
 1. `Argos-Local` a `main`: despliega el enrutador. Con el ASG en 0, o todavía sin el ASG, todo corre
-   en CPU como antes.
+   en CPU como antes. Hasta el `terraform apply`, Operate MVP solo avisa que no encuentra el ASG.
 2. `terraform apply` (workspace `cuenta-nueva`): crea la zona privada `argos.internal`, el grupo de
    seguridad, el rol, la plantilla de lanzamiento y el ASG en 0, y suma al rol de GitHub Actions los
    permisos para encenderlo y apagarlo. No cuesta nada hasta encenderlo.

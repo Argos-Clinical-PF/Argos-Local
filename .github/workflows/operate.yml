@@ -122,6 +122,12 @@ jobs:
       - name: Esperar host de inferencia GPU
         if: inputs.action == 'start' && inputs.gpu
         run: |
+          EXISTE=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names argos-inferencia \
+            --query 'length(AutoScalingGroups)' --output text 2>/dev/null || echo 0)
+          if [ "$EXISTE" = "0" ]; then
+            echo "::warning::No se encontró el ASG argos-inferencia (¿falta el terraform apply?); la transcripción va a la CPU de la app."
+            exit 0
+          fi
           for _ in $(seq 1 60); do
             EN_SERVICIO=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names argos-inferencia \
               --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'] | [0].[InstanceType,AvailabilityZone]" \
@@ -187,8 +193,11 @@ jobs:
       - name: Apagar host de inferencia GPU
         if: always() && inputs.action == 'stop' && (steps.seguridad.outcome == 'success' || inputs.forzar)
         run: |
-          EXISTE=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names argos-inferencia \
-            --query 'length(AutoScalingGroups)' --output text)
+          if ! EXISTE=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names argos-inferencia \
+            --query 'length(AutoScalingGroups)' --output text); then
+            echo "::warning::No se pudo consultar el ASG argos-inferencia (¿falta el terraform apply?); si existe, el vigía del host lo baja a 0."
+            exit 0
+          fi
           if [ "$EXISTE" = "0" ]; then
             echo "No existe el ASG argos-inferencia; nada que apagar."
             exit 0
