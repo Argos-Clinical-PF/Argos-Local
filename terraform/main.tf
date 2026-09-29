@@ -30,6 +30,7 @@ data "aws_ssm_parameter" "secreto_origen_cloudfront" {
   name = "/argos/mvp/secreto-origen-cloudfront"
 }
 
+# AMI del host de inferencia GPU (inferencia.tf): driver NVIDIA, Docker y NVIDIA Container Toolkit.
 data "aws_ssm_parameter" "dlami_gpu_al2023" {
   name = "/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-amazon-linux-2023/latest/ami-id"
 }
@@ -1082,9 +1083,16 @@ resource "aws_iam_role_policy" "github_actions" {
           "ssm:GetCommandInvocation",
           "ssm:ListCommandInvocations",
           "ssm:SendCommand",
-          "s3:ListAllMyBuckets"
+          "s3:ListAllMyBuckets",
+          "autoscaling:DescribeAutoScalingGroups"
         ]
         Resource = "*"
+      },
+      {
+        # Operate MVP enciende y apaga el host de inferencia GPU (inferencia.tf).
+        Effect   = "Allow"
+        Action   = "autoscaling:SetDesiredCapacity"
+        Resource = aws_autoscaling_group.inferencia.arn
       },
       {
         Effect = "Allow"

@@ -33,3 +33,13 @@ output "grabaciones_bucket" {
 output "github_actions_role_arn" {
   value = aws_iam_role.github_actions.arn
 }
+
+output "inferencia_asg" {
+  description = "ASG del host de inferencia GPU (Operate MVP lo lleva a 1 y a 0)"
+  value       = aws_autoscaling_group.inferencia.name
+}
+
+output "zona_interna_id" {
+  description = "Zona privada argos.internal, donde el host registra inferencia.argos.internal"
+  value       = aws_route53_zone.interna.zone_id
+}
