@@ -143,6 +143,13 @@ resource "aws_iam_role_policy" "inferencia" {
         Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/argos/mvp/diarizacion-enabled"
       },
       {
+        # AmazonSSMManagedInstanceCore da ssm:GetParameter(s) sobre "*": sin esto el host GPU lee
+        # todos los secretos de /argos/mvp, incluida la clave que cifra transcripciones y notas.
+        Effect      = "Deny"
+        Action      = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath", "ssm:GetParameterHistory"]
+        NotResource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/argos/mvp/diarizacion-enabled"
+      },
+      {
         # Solo su propio registro A.
         Effect   = "Allow"
         Action   = "route53:ChangeResourceRecordSets"
