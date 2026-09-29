@@ -548,7 +548,7 @@ probando en orden g6.xlarge, g5.xlarge, g6.2xlarge y g4dn.xlarge.
 
 ```text
 backend -> enrutador-modelos (Caddy :9100, interno, Caddyfile.modelos)
-             1.º inferencia.argos.internal:9000   host GPU: large-v3-turbo en cuda, vivo y refinamiento
+             1.º inferencia.argos.internal:9000   host GPU en cuda: large-v3-turbo en vivo, large-v3 en el refinamiento
              2.º transcripcion:9000               CPU de la app, igual que antes
 ```
 
@@ -621,9 +621,17 @@ en el `.env` de la app: un cambio de esos valores en `deploy-mvp.sh` va también
 
 ### Modelos
 
-El primer arranque baja large-v3-turbo (unos 1,6 GB) de Hugging Face y, ya cargado, lo sube a
-`s3://argos-mvp-operacion-616322963974/modelos/huggingface/`. Los siguientes arranques lo toman de
-ahí y no dependen de Hugging Face. Para forzar una descarga nueva, borrar ese prefijo. El encoder de
+El host usa large-v3-turbo en vivo (unos 1,6 GB) y large-v3 completo en el refinamiento post-sesión
+(unos 3,1 GB). Medido en la GPU sobre FLEURS es_419 (80 audios, 15 minutos, 2026-09-29):
+
+| Modelo | Errores, limpio | Errores, con ruido | Tiempo / duración del audio |
+|---|---|---|---|
+| large-v3-turbo | 2,94 % | 3,16 % | 0,023 |
+| large-v3 | 2,52 % | 2,78 % | 0,05 |
+
+Arranca con los dos desde `s3://argos-mvp-operacion-616322963974/modelos/huggingface/`. Si falta
+alguno lo baja de Hugging Face y, ya en disco, lo sube a ese prefijo: los siguientes arranques no
+dependen de Hugging Face. Para forzar una descarga nueva, borrar ese prefijo. El encoder de
 voces y el VAD vienen dentro de la imagen.
 
 ### Logs

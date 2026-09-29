@@ -112,8 +112,6 @@ MODELOS="s3://$BUCKET/modelos/huggingface/"
 install -d -m 700 "$CACHE"
 log "bajando la caché de modelos de $MODELOS"
 reintentar 5 10 aws s3 sync "$MODELOS" "$CACHE" --region "$REGION" --only-show-errors
-CACHE_VACIA=false
-[ -n "$(ls -A "$CACHE")" ] || CACHE_VACIA=true
 
 # El registro apunta acá antes de que el modelo cargue: el enrutador de la app no manda nada
 # hasta que /health responda "ok".
@@ -129,11 +127,14 @@ reintentar 5 5 aws route53 change-resource-record-sets --region "$REGION" \
 log "levantando la transcripción"
 /usr/local/bin/argos-inferencia-actualizar
 
-# Con el modelo ya cargado la caché está completa. Se suben los snapshots (el symlink resuelto) y
-# no los blobs, que son los mismos archivos: Hugging Face los encuentra igual en el próximo arranque.
-if [ "$CACHE_VACIA" = "true" ]; then
-  log "subiendo la caché de modelos a $MODELOS para los próximos arranques"
-  reintentar 3 30 aws s3 sync "$CACHE" "$MODELOS" --region "$REGION" --only-show-errors \
-    --exclude '*/blobs/*' --exclude '*/.locks/*' --exclude 'xet/*'
+# El modelo de refinamiento se carga recién en el primer refinamiento: se baja ahora para que la caché
+# quede completa. Después se sube a S3 solo lo que no estaba (--size-only: lo que vino de S3 no se
+# vuelve a subir), así un modelo nuevo baja de Hugging Face una sola vez. Se suben los snapshots (el
+# symlink resuelto) y no los blobs, que son los mismos archivos: Hugging Face los encuentra igual.
+if ! docker exec argos-transcripcion python -c 'import os; from faster_whisper import download_model; download_model(os.environ["WHISPER_REFINEMENT_MODEL"])' >/dev/null; then
+  log "no se pudo bajar el modelo de refinamiento; se baja en el primer refinamiento"
 fi
+log "sincronizando la caché de modelos con $MODELOS"
+reintentar 3 30 aws s3 sync "$CACHE" "$MODELOS" --region "$REGION" --only-show-errors --size-only \
+  --exclude '*/blobs/*' --exclude '*/.locks/*' --exclude 'xet/*'
 log "listo"
