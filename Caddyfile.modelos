@@ -14,9 +14,10 @@ http://:9100 {
 		health_interval 5s
 		health_timeout 3s
 
-		# Una falla de conexión saca al host 30 s sin esperar el próximo chequeo: solo el pedido que
-		# la encontró vuelve 502 y el backend lo reintenta. No hay reintento en el proxy: el cuerpo
-		# ya consumido no se puede reenviar, y esa falla quedaría anotada contra la CPU.
+		# Una falla de conexión saca al host 30 s sin esperar el próximo chequeo: solo vuelven 502 el
+		# pedido que la encontró y los que estaban en curso. El backend reintenta los fragmentos en
+		# vivo, no el refinamiento post-sesión. No hay reintento en el proxy: el cuerpo ya consumido
+		# no se puede reenviar, y esa falla quedaría anotada contra la CPU.
 		fail_duration 30s
 
 		# El refinamiento post-sesión puede tardar minutos en CPU: el proxy no corta la espera.

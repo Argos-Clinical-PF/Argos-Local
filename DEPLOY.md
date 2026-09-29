@@ -554,10 +554,13 @@ backend -> enrutador-modelos (Caddy :9100, interno, Caddyfile.modelos)
 
 - **Cómo elige el enrutador.** Consulta el `/health` de los dos cada 5 s y manda cada pedido al host
   GPU mientras responda `"estado":"ok"`. Si no (sin capacidad, arrancando, cargando el modelo,
-  apagado o caído), a la CPU de la app. Cuando el host desaparece, el único pedido que lo encuentra
-  vuelve 502 (a los 3 s si el registro DNS quedó apuntando a una IP sin host) y el backend lo
-  reintenta: ese y los siguientes van a la CPU, y el host queda afuera 30 s aunque vuelva antes. El
-  enrutador no corta pedidos largos: un refinamiento tarda lo que necesite.
+  apagado o caído), a la CPU de la app. Cuando el host desaparece, los pedidos que lo encuentran o
+  que estaban en curso en él vuelven 502 (a los 3 s si el registro DNS quedó apuntando a una IP sin
+  host), y el host queda afuera 30 s aunque vuelva antes. El backend reintenta los fragmentos en vivo
+  (ese reintento y los siguientes van a la CPU), pero no el refinamiento post-sesión: la grabación
+  queda en ERROR y la sesión sigue con la transcripción en vivo y, si era presencial con diarización,
+  sin agrupamiento de voces. El enrutador no corta pedidos largos: un refinamiento tarda lo que
+  necesite.
 - **Qué guarda.** Nada. El audio se procesa en memoria, el disco (cifrado con la clave `aws/ebs`,
   como el de la app) se borra al terminar la instancia y los datos clínicos siguen solo en la app. El
   tráfico entre la app y el host no sale de la VPC y va entre instancias Nitro, que lo cifran solas.
@@ -589,7 +592,12 @@ hay capacidad GPU en ninguna zona, el run termina en verde con un aviso y la tra
 CPU; el ASG sigue intentando solo. El host tarda unos minutos más en cargar el modelo, y hasta que su
 `/health` responda `ok` el enrutador usa la CPU.
 
-Para forzar CPU con la app encendida (por ejemplo, para comparar), bajar el host a mano:
+Para forzar CPU con la app encendida (por ejemplo, para comparar), bajar el host a mano. Nunca con
+un refinamiento post-sesión en curso: el que esté corriendo en el host se pierde (los fragmentos en
+vivo, en cambio, se reintentan contra la CPU). Lo más simple es bajarlo antes de empezar la sesión,
+después de confirmar `"seguro":true` con la misma consulta que usa Release MVP
+(`docker exec argos-backend wget -qO- http://localhost:8080/api/health/deployment-safety`, por SSM
+en `argos-app`):
 
 ```bash
 aws autoscaling set-desired-capacity --auto-scaling-group-name argos-inferencia --desired-capacity 0
