@@ -58,7 +58,7 @@ chmod +x "$TMP/bin/docker" "$TMP/bin/aws"
 # Como en la instancia: el workflow deja el bundle en entrante/ y la app tiene el release anterior.
 mkdir -p "$TMP/entrante"
 cp "$DEPLOY" "$RAIZ/scripts/refresh-ip-certificate.sh" "$RAIZ/docker-compose.prod.yml" \
-  "$RAIZ/docker-compose.gpu.yml" "$RAIZ/Caddyfile" "$TMP/entrante/"
+  "$RAIZ/Caddyfile" "$RAIZ/Caddyfile.modelos" "$TMP/entrante/"
 
 correr_deploy() {
   rm -rf "$TMP/llamadas" "$TMP/paso-el-gate" "$TMP/aplicado-antes-de-aws" "$TMP/salida" "$TMP/app"
@@ -81,7 +81,7 @@ app_sin_tocar() { [ "$(ls -A "$TMP/app")" = "Caddyfile" ] && grep -qx "caddy del
 aplicado_antes_de_aws() { [ -e "$TMP/aplicado-antes-de-aws" ]; }
 app_completa() {
   local archivo
-  for archivo in docker-compose.prod.yml docker-compose.gpu.yml Caddyfile deploy-mvp.sh refresh-ip-certificate.sh; do
+  for archivo in docker-compose.prod.yml Caddyfile Caddyfile.modelos deploy-mvp.sh refresh-ip-certificate.sh; do
     cmp -s "$TMP/entrante/$archivo" "$TMP/app/$archivo" || return 1
   done
   [ -x "$TMP/app/deploy-mvp.sh" ] && [ -x "$TMP/app/refresh-ip-certificate.sh" ]

@@ -30,13 +30,9 @@ data "aws_ssm_parameter" "secreto_origen_cloudfront" {
   name = "/argos/mvp/secreto-origen-cloudfront"
 }
 
+# AMI del host de inferencia GPU (inferencia.tf): driver NVIDIA, Docker y NVIDIA Container Toolkit.
 data "aws_ssm_parameter" "dlami_gpu_al2023" {
   name = "/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-amazon-linux-2023/latest/ami-id"
-}
-
-locals {
-  ami_id        = var.demo_gpu ? data.aws_ssm_parameter.dlami_gpu_al2023.value : data.aws_ami.al2023.id
-  instance_type = var.demo_gpu ? var.gpu_instance_type : var.instance_type
 }
 
 resource "aws_ecr_repository" "repos" {
@@ -96,8 +92,8 @@ resource "aws_security_group" "ec2" {
 }
 
 resource "aws_instance" "app" {
-  ami                         = local.ami_id
-  instance_type               = local.instance_type
+  ami                         = data.aws_ami.al2023.id
+  instance_type               = var.instance_type
   subnet_id                   = data.aws_subnets.default.ids[0]
   vpc_security_group_ids      = [aws_security_group.ec2.id]
   iam_instance_profile        = aws_iam_instance_profile.ec2.name
@@ -122,12 +118,12 @@ resource "aws_instance" "app" {
 
   tags = {
     Name        = "argos-app"
-    ComputeMode = var.demo_gpu ? "gpu-demo" : "cpu"
+    ComputeMode = "cpu"
   }
 
   lifecycle {
-    # La AMI latest solo se adopta en una recreacion explicitamente revisada.
-    # Para cambiar CPU/GPU usar -replace; nunca destruir el host por drift diario.
+    # La AMI latest solo se adopta en una recreacion explicitamente revisada; nunca destruir el
+    # host por drift diario. La GPU no va en esta instancia sino en el host de inferencia (ADR-037).
     ignore_changes = [ami]
   }
 
@@ -1082,9 +1078,16 @@ resource "aws_iam_role_policy" "github_actions" {
           "ssm:GetCommandInvocation",
           "ssm:ListCommandInvocations",
           "ssm:SendCommand",
-          "s3:ListAllMyBuckets"
+          "s3:ListAllMyBuckets",
+          "autoscaling:DescribeAutoScalingGroups"
         ]
         Resource = "*"
+      },
+      {
+        # Operate MVP enciende y apaga el host de inferencia GPU (inferencia.tf).
+        Effect   = "Allow"
+        Action   = "autoscaling:SetDesiredCapacity"
+        Resource = aws_autoscaling_group.inferencia.arn
       },
       {
         Effect = "Allow"
