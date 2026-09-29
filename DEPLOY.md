@@ -570,12 +570,12 @@ backend -> enrutador-modelos (Caddy :9100, interno, Caddyfile.modelos)
 
 ### Puesta en marcha (una vez)
 
-1. `Argos-Local` a `main`: despliega el enrutador. Con el ASG en 0, o todavía sin el ASG, todo corre
-   en CPU como antes. Hasta el `terraform apply`, Operate MVP solo avisa que no encuentra el ASG.
-2. Quitar `demo_gpu` y `gpu_instance_type` del `terraform.tfvars` local: esas variables ya no
+1. Quitar `demo_gpu` y `gpu_instance_type` del `terraform.tfvars` local: esas variables ya no
    existen. Después, `terraform apply` (workspace `cuenta-nueva`): crea la zona privada
    `argos.internal`, el grupo de seguridad, el rol, la plantilla de lanzamiento y el ASG en 0, y suma
    al rol de GitHub Actions los permisos para encenderlo y apagarlo. No cuesta nada hasta encenderlo.
+   Va primero para que los workflows ya tengan esos permisos cuando llegue el paso 2.
+2. `Argos-Local` a `main`: despliega el enrutador. Con el ASG en 0 todo corre en CPU como antes.
 3. Para cada tag de transcripción tiene que existir en ECR la variante `argos-transcripcion:<tag>-gpu`,
    que publica la CI de Argos-Entrenamiento junto con la de CPU.
 
@@ -611,8 +611,8 @@ rollback) y el host GPU está en servicio, corre en él por SSM `/usr/local/bin/
 relee el manifiesto recién promovido y recrea el contenedor solo si cambió la imagen de transcripción
 o el parámetro `/argos/mvp/diarizacion-enabled`. Si la variante `-gpu` del tag nuevo no existe, saca
 la versión anterior para no mezclar versiones, el enrutador usa la CPU y el run solo avisa. Un host
-nuevo toma el manifiesto vigente al arrancar. Cuando Release MVP detiene la app al terminar, no toca
-el ASG: el vigía baja el host entre 5 y 10 minutos después.
+nuevo toma el manifiesto vigente al arrancar. Cuando Release MVP detiene la app al terminar, también
+baja el ASG a 0; si eso falla, el vigía baja el host entre 5 y 10 minutos después.
 
 Los valores del servicio de transcripción del host GPU están en `scripts/inferencia-actualizar.sh`, no
 en el `.env` de la app: un cambio de esos valores en `deploy-mvp.sh` va también ahí. El user data

@@ -530,6 +530,9 @@ jobs:
           if [ "$ESTADO" != "stopped" ]; then
             aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
           fi
+          # ADR-037: la GPU no queda facturando sin la app. Si falla, el vigía del host la baja igual.
+          aws autoscaling set-desired-capacity --auto-scaling-group-name argos-inferencia --desired-capacity 0 \
+            || echo "::warning::No se pudo bajar el host GPU; el vigía lo apaga en 5 a 10 minutos."
 
       - name: Bloquear apagado con trabajo clínico activo
         if: success() && (github.event_name == 'push' || inputs.stop_after) && vars.DETENER_EC2_TRAS_DEPLOY != 'false' && steps.shutdown_safety.outputs.safe != 'true'
