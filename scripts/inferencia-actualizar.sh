@@ -8,6 +8,11 @@
 # que tiene la versión nueva, en vez de mezclar versiones.
 set -euo pipefail
 
+# Una corrida a la vez: la del user data y la de Release MVP pueden coincidir en los primeros
+# minutos del host, y la segunda tiene que leer el manifiesto recién cuando la primera terminó.
+exec 9>/run/argos-inferencia-actualizar.lock
+flock 9
+
 # shellcheck source=/dev/null
 . /etc/argos-inferencia.env
 REGISTRO="${REPOSITORIO%%/*}"
