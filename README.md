@@ -132,6 +132,10 @@ docker compose down -v
 
 Por eso `Argos-Local` debe mantenerse como carpeta hermana de los tres repos de codigo.
 
+La imagen de emociones es solo `linux/amd64` (`mediapipe==0.10.35` no publica ruedas Linux para
+ARM), asi que el compose la fija con `platform: linux/amd64`: en una Mac con Apple Silicon corre
+emulada y mas lenta.
+
 **El contexto de los servicios de IA es la raiz de `Argos-Entrenamiento`, no la carpeta del
 servicio.** `services/servicio-transcripcion/Dockerfile` reusa `models/fbank_kaldi.py` para la
 diarizacion en vez de duplicarlo, y ese archivo vive fuera de `services/servicio-transcripcion/`.
