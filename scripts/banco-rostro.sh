@@ -8,7 +8,7 @@
 #                                            final en metrics.json (si la decisión 2 apaga la reidentificación
 #                                            automática, la corrida principal se repite con el valor nuevo)
 #   scripts/banco-rostro.sh holdout <metrics.json de la calibración>
-#                                            actores 21-24, una sola vez, con los parámetros congelados cuyo
+#                                            actores 17-20 (ARGOS_BANCO_ACTORES_HOLDOUT; 21-24 ya se usaron), una sola vez, con los parámetros congelados cuyo
 #                                            SHA-256 registró esa calibración; sale con 1 si falla algún
 #                                            umbral H1-H8 o el control de 9.4
 #   scripts/banco-rostro.sh validar          un par, E1 + E2 + E7 adversario, 20 s por secuencia: prueba
@@ -212,7 +212,7 @@ case "$caso" in
     preparar
     mkdir -p "$RUNS/$CORRIDA-holdout"
     cp "$CONGELADOS" "$RUNS/$CORRIDA-holdout/parametros_congelados.json"
-    generar holdout 21,22,23,24 --parametros "/runs/$CORRIDA-holdout/parametros_congelados.json" \
+    generar holdout "${ARGOS_BANCO_ACTORES_HOLDOUT:-17,18,19,20}" --parametros "/runs/$CORRIDA-holdout/parametros_congelados.json" \
       --calibracion "/runs/${calibracion#"$runs_real"/}" \
       ${ARGOS_BANCO_FORZAR_HOLDOUT:+--forzar-holdout "$ARGOS_BANCO_FORZAR_HOLDOUT"}
     cadena holdout "$CORRIDA-holdout" --holdout
