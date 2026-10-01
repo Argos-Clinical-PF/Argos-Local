@@ -13,7 +13,8 @@
 #                                            umbral H1-H8 o el control de 9.4
 #   scripts/banco-rostro.sh validar          un par, E1 + E2 + E7 adversario, 20 s por secuencia: prueba
 #                                            la cadena de punta a punta (salida *-smoke, no se versiona);
-#                                            ARGOS_BANCO_VALIDAR_ESCENARIOS y ..._RECORTE_MS la cambian
+#                                            ARGOS_BANCO_VALIDAR_ESCENARIOS, ..._ACTORES, ..._PARES,
+#                                            ..._RECORTE_MS (0: completa) y ..._SOLO_FIJA=1 la cambian
 #   scripts/banco-rostro.sh limpiar [--todo] borra el volumen tmpfs y las imágenes huérfanas del banco;
 #                                            con --todo también la imagen del banco, la de Maven y su caché
 #
@@ -220,8 +221,16 @@ case "$caso" in
   validar)
     preparar
     mkdir -p "$RUNS/$CORRIDA-smoke"
-    generar validacion 01,02 --escenarios "${ARGOS_BANCO_VALIDAR_ESCENARIOS:-E1,E2,E7:a-adversario}" \
-      --pares 01-02 --recorte-ms "${ARGOS_BANCO_VALIDAR_RECORTE_MS:-20000}"
+    extra=()
+    if [ "${ARGOS_BANCO_VALIDAR_RECORTE_MS:-20000}" != "0" ]; then
+      extra+=(--recorte-ms "${ARGOS_BANCO_VALIDAR_RECORTE_MS:-20000}")
+    fi
+    if [ "${ARGOS_BANCO_VALIDAR_SOLO_FIJA:-0}" = "1" ]; then
+      extra+=(--solo-fija)
+    fi
+    generar validacion "${ARGOS_BANCO_VALIDAR_ACTORES:-01,02}" \
+      --escenarios "${ARGOS_BANCO_VALIDAR_ESCENARIOS:-E1,E2,E7:a-adversario}" \
+      --pares "${ARGOS_BANCO_VALIDAR_PARES:-01-02}" ${extra[@]+"${extra[@]}"}
     cadena validacion "$CORRIDA-smoke"
     ;;
   limpiar)
