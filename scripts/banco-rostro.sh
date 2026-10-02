@@ -7,6 +7,10 @@
 #                                            valores de 9.4 quedan en parametros_congelados.json y su SHA-256
 #                                            final en metrics.json (si la decisión 2 apaga la reidentificación
 #                                            automática, la corrida principal se repite con el valor nuevo)
+#   scripts/banco-rostro.sh reproducir <dir> la calibración sin regenerar: carga los cuadros ya generados
+#                                            (entrada/, verdad/, generacion.json de una calibración guardada con
+#                                            ARGOS_BANCO_GUARDAR_CUADROS) y corre solo replay y métricas (minutos
+#                                            en vez de horas); vale mientras no cambie el servicio de emociones
 #   scripts/banco-rostro.sh holdout <metrics.json de la calibración>
 #                                            actores 17-20 (ARGOS_BANCO_ACTORES_HOLDOUT; 21-24 ya se usaron), una sola vez, con los parámetros congelados cuyo
 #                                            SHA-256 registró esa calibración; sale con 1 si falla algún
@@ -22,7 +26,8 @@
 # ARGOS_BANCO_PROCESOS (8), ARGOS_BANCO_TMPFS (4g), ARGOS_BANCO_CORRIDA (rastreo-rostro-<fecha>),
 # ARGOS_BANCO_DISCO_MINIMO_GB (6), ARGOS_BANCO_CONSERVAR=1 no borra el tmpfs al terminar (depuración),
 # ARGOS_BANCO_CALIBRACION (el metrics.json de la calibración, en lugar del argumento del holdout),
-# ARGOS_BANCO_FORZAR_HOLDOUT=<motivo> repite un holdout ya evaluado (lo invalida; queda registrado).
+# ARGOS_BANCO_FORZAR_HOLDOUT=<motivo> repite un holdout ya evaluado (lo invalida; queda registrado),
+# ARGOS_BANCO_GUARDAR_CUADROS=<dir> copia los cuadros generados de la calibración a ese directorio.
 set -euo pipefail
 
 ORIGEN="$PWD"
@@ -182,10 +187,27 @@ preparar() {
 
 caso="${1:-}"
 case "$caso" in
-  calibracion)
+  calibracion | reproducir)
+    if [ "$1" = reproducir ]; then
+      CUADROS="$(cd "${2:?falta el directorio con los cuadros generados}" && pwd)"
+      [ -d "$CUADROS/entrada" ] && [ -d "$CUADROS/verdad" ] && [ -f "$CUADROS/generacion.json" ] \
+        || { echo "ABORTA: $CUADROS no tiene entrada/, verdad/ y generacion.json" >&2; exit 2; }
+    fi
     preparar
     mkdir -p "$RUNS/$CORRIDA"
-    generar calibracion 01,02,03,04
+    if [ "$1" = reproducir ]; then
+      registro "cargando los cuadros generados de $CUADROS (sin regenerar)"
+      docker run --rm -v "$VOLUMEN":/banco -v "$CUADROS":/cuadros:ro alpine:3.22 \
+        sh -c 'mkdir -p /banco/calibracion && cp -r /cuadros/entrada /cuadros/verdad /cuadros/generacion.json /banco/calibracion/'
+    else
+      generar calibracion 01,02,03,04
+      if [ -n "${ARGOS_BANCO_GUARDAR_CUADROS:-}" ]; then
+        mkdir -p "$ARGOS_BANCO_GUARDAR_CUADROS"
+        docker run --rm -v "$VOLUMEN":/banco -v "$(cd "$ARGOS_BANCO_GUARDAR_CUADROS" && pwd)":/destino alpine:3.22 \
+          sh -c 'cp -r /banco/calibracion/entrada /banco/calibracion/verdad /banco/calibracion/generacion.json /destino/'
+        registro "cuadros generados guardados en $ARGOS_BANCO_GUARDAR_CUADROS"
+      fi
+    fi
     cadena calibracion "$CORRIDA"
     cp "$RUNS/$CORRIDA/parametros_congelados.json" "$CONGELADOS"
     registro "parámetros congelados (6.12 y 9.4): $CONGELADOS (sha256 $(shasum -a 256 "$CONGELADOS" | cut -d' ' -f1)," \
@@ -237,7 +259,7 @@ case "$caso" in
     limpiar "${2:-}"
     ;;
   *)
-    sed -n '2,24p' "$0"
+    sed -n '2,30p' "$0"
     exit 2
     ;;
 esac
