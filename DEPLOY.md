@@ -273,6 +273,38 @@ tasa de abstención, la cobertura, la distribución del margen contra el 0,30 ad
 útil— cuántos fragmentos corrige el profesional a mano después de asignar, que queda registrado en
 `origen_hablante = 'PROFESIONAL'`.
 
+## Rastreo del rostro por cuadros (ADR-038)
+
+Apagado por defecto. Encendido, la sala manda cuadros de la vista del paciente (entre 2,5 y 5 por
+segundo) en vez de una foto por ventana de 4 s, el backend sigue el rostro del paciente y una
+ventana solo se lee con los cuadros en los que el rastro está confirmado, continuo y sin tapar.
+
+Igual que la diarización, la bandera **sale de SSM**:
+
+```bash
+aws ssm put-parameter --name /argos/mvp/emociones-rastreo-habilitado \
+  --value true --type String --overwrite
+# opcional: solo estos profesionales (UUIDs separados por coma); sin el parámetro, todos
+aws ssm put-parameter --name /argos/mvp/emociones-rastreo-piloto \
+  --value "<uuid>,<uuid>" --type String --overwrite
+# y volver a desplegar para que el .env de la instancia se regenere
+```
+
+**Orden de despliegue:** `Argos-Local` a `main` primero, después la imagen de `emociones` (trae
+`/infer/cuadro`), el backend y por último el frontend. Con la bandera apagada cada pieza nueva
+convive con las viejas: un frontend sin el modo nuevo sigue con una foto por ventana, y un backend
+nuevo con la bandera apagada responde como antes.
+
+**Reversión:** poner `emociones-rastreo-habilitado` en `false` y redesplegar. La sala recibe un 404
+en `/cuadros` y vuelve sola a una foto por ventana. No cambiar la bandera con sesiones en curso: una
+sala que vuelve a la foto por ventana puede chocar con la numeración de una ventana que el rastreo
+cerró después.
+
+**Qué mirar.** Una línea INFO por ventana (sesión, número de ventana, cuadros recibidos y usados,
+motivo de abstención, traceId); nunca cajas, firmas ni huellas. El modo de carga (`NORMAL`,
+`CPU_COMPARTIDA`, `PROTECCION`) sale del `/health` del enrutador de modelos: con el host GPU
+sirviendo, la transcripción no compite por la CPU de la app.
+
 ## Operación diaria
 
 Para una demo:
