@@ -132,6 +132,10 @@ docker compose down -v
 
 Por eso `Argos-Local` debe mantenerse como carpeta hermana de los tres repos de codigo.
 
+La imagen de emociones es solo `linux/amd64` (`mediapipe==0.10.35` no publica ruedas Linux para
+ARM), asi que el compose la fija con `platform: linux/amd64`: en una Mac con Apple Silicon corre
+emulada y mas lenta.
+
 **El contexto de los servicios de IA es la raiz de `Argos-Entrenamiento`, no la carpeta del
 servicio.** `services/servicio-transcripcion/Dockerfile` reusa `models/fbank_kaldi.py` para la
 diarizacion en vez de duplicarlo, y ese archivo vive fuera de `services/servicio-transcripcion/`.
@@ -150,6 +154,23 @@ Un cambio de configuracion que solo toque `docker-compose.yml` **no llega a prod
 La fusion emocional intermedia y el encoder de audio adaptado (ARGOS-169, ADR-024/ADR-025) se
 eliminaron: `servicio-emociones` solo expone `/infer/video`, identico en presencial y virtual.
 Ver [ADR-027](../Argos-Documentacion/ADRs/ARGOS_ADR_027_Eliminacion_de_la_Fusion_Tardia.md).
+
+## Banco del rastreo facial
+
+`docker-compose.banco-rostro.yml` y `scripts/banco-rostro.sh` corren el banco offline de ADR-038
+(diseno 12): generan los cuadros de RAVDESS con el mismo codigo de `/infer/cuadro`, los reproducen
+con el `ProcesadorCuadros` real del backend (`maven:3.9-eclipse-temurin-21`) y calculan las metricas.
+
+```bash
+scripts/banco-rostro.sh validar       # cadena completa sobre un subconjunto chico
+scripts/banco-rostro.sh calibracion   # actores 01-04: congela los parametros (6.12) y mide
+scripts/banco-rostro.sh holdout       # actores 21-24, una vez; sale con 1 si falla H1-H8
+scripts/banco-rostro.sh limpiar       # volumen tmpfs e imagenes huerfanas del banco
+```
+
+RAVDESS (CC BY-NC-SA, solo evaluacion) se monta de solo lectura desde `ARGOS_BANCO_DATOS`
+(por defecto `../_datos-evaluacion/ravdess`). Todo lo intermedio vive en un volumen tmpfs que el
+script borra al terminar; a `Argos-Entrenamiento/models/runs/` solo llegan agregados.
 
 ## Notas de configuracion
 

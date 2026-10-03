@@ -1,0 +1,99 @@
+# Rastreo del rostro por cuadros de punta a punta (ADR-038): backend con la bandera encendida, el
+# servicio de emociones real y una base propia, sin tocar la base local de desarrollo. No levanta
+# transcripción: el sondeo de salud falla y el backend queda en CPU_COMPARTIDA, el modo de una
+# instancia sin GPU. Solo datos sintéticos (ver scripts/aceptacion-rastreo-rostro.mjs).
+#
+#   ARGOS_E2E_BACKEND=../Argos-Backend ARGOS_E2E_ENTRENAMIENTO=../Argos-Entrenamiento \
+#     docker compose -f docker-compose.rastreo-e2e.yml up -d --wait
+#   # La cuenta demo del seed está en TRIAL (5 pacientes, 120 min de transcripción por mes): en esta
+#   # base descartable se suben los límites para que la carga no choque con la cuota.
+#   docker exec argos-rastreo-e2e-postgres-1 psql -U argos_local -d argos_rastreo -c \
+#     "UPDATE planes SET limite_pacientes_activos = 1000, limite_minutos_transcripcion_mes = 100000 WHERE codigo = 'TRIAL'"
+#   ARGOS_CONTENEDOR_EMOCIONES=argos-rastreo-e2e-emociones-1 node scripts/aceptacion-rastreo-rostro.mjs
+#   docker compose -f docker-compose.rastreo-e2e.yml down -v
+name: argos-rastreo-e2e
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: argos_rastreo
+      POSTGRES_USER: argos_local
+      POSTGRES_PASSWORD: argos_solo_validacion_local
+    volumes:
+      - datos:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U argos_local -d argos_rastreo"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  emociones:
+    build:
+      context: ${ARGOS_E2E_ENTRENAMIENTO:-../Argos-Entrenamiento}
+      dockerfile: services/servicio-emociones/Dockerfile
+      target: production
+    # La misma arquitectura que la c7i.
+    platform: linux/amd64
+    environment:
+      EMOCIONES_MODEL_ID: emotiefflib-enet-b0-8-va-mtl
+      EMOCIONES_MOCK: "false"
+      EMOCIONES_STRICT_LOAD: "true"
+      EMOCIONES_REQUIRE_FACE_TRACKING: "true"
+      EMOCIONES_ORT_HILOS: "1"
+      EMOCIONES_OPENCV_HILOS: "1"
+      OMP_NUM_THREADS: "1"
+    cpus: "1.5"
+    cpu_shares: 256
+    volumes:
+      - cache-emotiefflib:/root/.emotiefflib
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:9010/health'))['listo']"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    image: maven:3.9-eclipse-temurin-21
+    working_dir: /app
+    command: ["mvn", "-B", "-q", "spring-boot:run", "-DskipTests"]
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/argos_rastreo
+      DB_USERNAME: argos_local
+      DB_PASSWORD: argos_solo_validacion_local
+      APP_PUBLIC_BASE_URL: http://localhost:5182
+      CORS_ALLOWED_ORIGINS: http://localhost:5182
+      APP_DEMO_SEED_ENABLED: "true"
+      MAIL_HOST: localhost
+      MAIL_PORT: 1025
+      MAIL_SMTP_AUTH: "false"
+      MAIL_SMTP_STARTTLS_ENABLE: "false"
+      RECORDINGS_ENABLED: "false"
+      PROCESSING_AUDIO_ENABLED: "false"
+      AWS_EC2_METADATA_DISABLED: "true"
+      EMOCIONES_SERVICE_URL: http://emociones:9010
+      TRANSCRIPCION_SERVICE_URL: http://transcripcion-ausente:9000
+      ARGOS_EMOCIONES_RASTREO_HABILITADO: "true"
+      JAVA_TOOL_OPTIONS: -Xmx768m -XX:+UseG1GC
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ${ARGOS_E2E_BACKEND:-../Argos-Backend}:/app
+      - compilacion:/app/target
+      - cache-maven:/root/.m2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      emociones:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, "curl -fs http://localhost:8080/api/health >/dev/null"]
+      interval: 5s
+      timeout: 4s
+      retries: 60
+      start_period: 60s
+
+volumes:
+  datos:
+  compilacion:
+  cache-emotiefflib:
+  cache-maven:

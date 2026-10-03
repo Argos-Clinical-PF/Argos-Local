@@ -73,6 +73,9 @@ DIARIZACION_ENABLED="$(get_parameter_optional diarizacion-enabled)"
 DIARIZACION_ENABLED="${DIARIZACION_ENABLED:-false}"
 ESPERA_ASIGNACION_HORAS="$(get_parameter_optional espera-asignacion-horas)"
 ESPERA_ASIGNACION_HORAS="${ESPERA_ASIGNACION_HORAS:-24}"
+RASTREO_HABILITADO="$(get_parameter_optional emociones-rastreo-habilitado)"
+RASTREO_HABILITADO="${RASTREO_HABILITADO:-false}"
+RASTREO_PILOTO="$(get_parameter_optional emociones-rastreo-piloto)"
 
 umask 077
 {
@@ -166,6 +169,10 @@ umask 077
   # instancia no sobrevive al siguiente.
   printf 'ARGOS_DIARIZACION_ENABLED=%s\n' "$DIARIZACION_ENABLED"
   printf 'ARGOS_ESPERA_ASIGNACION_HORAS=%s\n' "$ESPERA_ASIGNACION_HORAS"
+  # ADR-038. Igual que la diarización: sale de SSM porque el workflow no pasa variables propias.
+  #   aws ssm put-parameter --name /argos/mvp/emociones-rastreo-habilitado --value true --type String --overwrite
+  printf 'ARGOS_EMOCIONES_RASTREO_HABILITADO=%s\n' "$RASTREO_HABILITADO"
+  printf 'ARGOS_EMOCIONES_RASTREO_PILOTO=%s\n' "$RASTREO_PILOTO"
   printf 'CADDYFILE_SHA256=%s\n' "$(sha256sum Caddyfile | cut -d' ' -f1)"
   printf 'CADDYFILE_MODELOS_SHA256=%s\n' "$(sha256sum Caddyfile.modelos | cut -d' ' -f1)"
 } > .env

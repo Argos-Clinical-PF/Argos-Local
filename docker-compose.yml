@@ -79,6 +79,8 @@ services:
       TRANSCRIPCION_REFINEMENT_TIMEOUT_MINUTES: ${TRANSCRIPCION_REFINEMENT_TIMEOUT_MINUTES:-120}
       ARGOS_DIARIZACION_ENABLED: ${ARGOS_DIARIZACION_ENABLED:-false}
       ARGOS_ESPERA_ASIGNACION_HORAS: ${ARGOS_ESPERA_ASIGNACION_HORAS:-24}
+      ARGOS_EMOCIONES_RASTREO_HABILITADO: ${ARGOS_EMOCIONES_RASTREO_HABILITADO:-false}
+      ARGOS_EMOCIONES_RASTREO_PILOTO: ${ARGOS_EMOCIONES_RASTREO_PILOTO:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
@@ -166,6 +168,9 @@ services:
       WHISPER_NUM_WORKERS: ${WHISPER_NUM_WORKERS:-2}
       WHISPER_MAX_CONCURRENT_INFERENCES: ${WHISPER_MAX_CONCURRENT_INFERENCES:-2}
       WHISPER_VAD_MIN_SILENCE_MS: ${WHISPER_VAD_MIN_SILENCE_MS:-250}
+    # Peso de CPU por defecto de Docker, escrito a propósito: es la referencia frente a la que
+    # emociones (256) pesa cuatro veces menos cuando las dos compiten.
+    cpu_shares: 1024
     ports:
       - "${TRANSCRIPCION_PORT:-9000}:9000"
     volumes:
@@ -182,6 +187,9 @@ services:
     build:
       context: ../Argos-Entrenamiento
       dockerfile: services/servicio-emociones/Dockerfile
+    # mediapipe==0.10.35 solo publica ruedas x86_64 para Linux: sin esto el build falla en Apple
+    # Silicon. Ahí la imagen corre emulada (más lenta); en la EC2 y en la CI es nativa.
+    platform: linux/amd64
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-va-mtl}
@@ -190,6 +198,17 @@ services:
       EMOCIONES_MOCK: ${EMOCIONES_MOCK:-false}
       EMOCIONES_STRICT_LOAD: ${EMOCIONES_STRICT_LOAD:-true}
       EMOCIONES_REQUIRE_FACE_TRACKING: ${EMOCIONES_REQUIRE_FACE_TRACKING:-true}
+      # Un hilo por inferencia en ONNX Runtime, OpenCV y OpenMP. El servicio ya hace una inferencia
+      # por vez (un solo lock), y los pools por defecto abren un hilo por núcleo que espera girando y
+      # le disputa la CPU a Whisper (ver .env.example).
+      EMOCIONES_ORT_HILOS: ${EMOCIONES_ORT_HILOS:-1}
+      EMOCIONES_OPENCV_HILOS: ${EMOCIONES_OPENCV_HILOS:-1}
+      OMP_NUM_THREADS: "1"
+    # Emociones corre en la misma máquina que la transcripción en vivo. Nunca pasa de 1,5 CPU y, con
+    # la CPU disputada, recibe un cuarto de lo que recibe transcripción: el análisis visual puede
+    # atrasarse, el texto de la sesión no.
+    cpus: "1.5"
+    cpu_shares: 256
     ports:
       - "${EMOCIONES_PORT:-9010}:9010"
     healthcheck:

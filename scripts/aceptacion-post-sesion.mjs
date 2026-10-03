@@ -43,7 +43,9 @@ try {
   console.log(`SESION_PRUEBA ${sesionId}`)
   const alcances = ['CAPTURA_AUDIO', 'TRANSCRIPCION_LOCAL', 'CAPTURA_VIDEO', 'ANALISIS_EMOCIONAL_VIDEO']
   const solicitud = ok(await api(`/api/sessions/${sesionId}/consent-requests`, 'POST', { alcances }), 'solicitar consentimiento ficticio')
-  const secreto = new URL(solicitud.urlPublica).pathname.split('/').pop()
+  // El secreto viaja en el fragmento (`#t=`), que no llega a ningún registro.
+  const enlace = new URL(solicitud.urlPublica)
+  const secreto = new URLSearchParams(enlace.hash.slice(1)).get('t') ?? enlace.pathname.split('/').pop()
   const publico = ok(await api(`/public/consents/${secreto}`, 'GET', undefined, false), 'leer consentimiento')
   ok(await api(`/public/consents/${secreto}/decision`, 'POST', { decision: 'ACEPTAR', alcancesAceptados: alcances, declaracionIdentidad: true, versionTerminos: publico.versionTerminos, retencionAudio: 'NO_GUARDAR', retencionVideo: 'NO_GUARDAR' }, false), 'aceptar solo datos sinteticos')
   ok(await api(`/api/sessions/${sesionId}/start`, 'PATCH', { alcances, dispositivos: { microfonoValidado: true, camaraConfirmada: true, camaraOmitida: false } }), 'iniciar sesion de prueba por API')
