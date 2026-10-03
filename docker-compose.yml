@@ -185,6 +185,9 @@ services:
     build:
       context: ../Argos-Entrenamiento
       dockerfile: services/servicio-emociones/Dockerfile
+    # mediapipe==0.10.35 solo publica ruedas x86_64 para Linux: sin esto el build falla en Apple
+    # Silicon. Ahí la imagen corre emulada (más lenta); en la EC2 y en la CI es nativa.
+    platform: linux/amd64
     container_name: argos-emociones
     environment:
       EMOCIONES_MODEL_ID: ${EMOCIONES_MODEL_ID:-emotiefflib-enet-b0-8-va-mtl}

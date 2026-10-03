@@ -1,0 +1,63 @@
+# Banco offline del rastreo facial (ADR-038, diseño 12). No levanta servicios: son tareas que corre
+# scripts/banco-rostro.sh (generar, replay, métricas, limpiar). Todo lo intermedio (respuestas del
+# servicio, verdad de campo, salida del replay) vive en un volumen tmpfs que se borra al final; a los
+# repos solo llegan agregados (Argos-Entrenamiento/models/runs/rastreo-rostro-<fecha>/).
+#
+# RAVDESS es CC BY-NC-SA, solo evaluación: se monta de solo lectura y nunca se copia.
+name: argos-banco-rostro
+
+services:
+  generador:
+    build:
+      context: ${ARGOS_BANCO_ENTRENAMIENTO:-../Argos-Entrenamiento}
+      dockerfile: services/servicio-emociones/Dockerfile
+      target: banco
+    image: argos-banco-rostro:local
+    # mediapipe==0.10.35 solo publica ruedas x86_64 para Linux: en Apple Silicon corre emulado.
+    platform: linux/amd64
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app/services/servicio-emociones:/app
+      # Los mismos valores que el servicio en producción (docker-compose.prod.yml).
+      EMOCIONES_ORT_HILOS: "1"
+      EMOCIONES_OPENCV_HILOS: "1"
+      OMP_NUM_THREADS: "1"
+      EMOCIONES_DETECCION_MIN_CONFIANZA: "0.40"
+      EMOCIONES_MAX_ROSTROS: "6"
+    volumes:
+      - ${ARGOS_BANCO_DATOS:-../_datos-evaluacion/ravdess}:/datos:ro
+      - banco:/banco
+      - ${ARGOS_BANCO_ENTRENAMIENTO:-../Argos-Entrenamiento}/models/runs:/runs
+    profiles: ["banco"]
+
+  # Un tmpfs de Docker se monta con el primer contenedor que lo usa y se desmonta (vacío) con el
+  # último: este contenedor lo mantiene montado mientras dura la corrida, y al bajarlo se pierde todo.
+  retenedor:
+    image: argos-banco-rostro:local
+    platform: linux/amd64
+    command: ["sleep", "infinity"]
+    init: true
+    volumes:
+      - banco:/banco
+    profiles: ["banco"]
+
+  replay:
+    image: maven:3.9-eclipse-temurin-21
+    # El código se monta de solo lectura y se compila en una copia dentro del contenedor, así el
+    # checkout no recibe ni un target/.
+    working_dir: /tmp/backend
+    volumes:
+      - ${ARGOS_BANCO_BACKEND:-../Argos-Backend}:/fuente:ro
+      - banco:/banco
+      - m2:/root/.m2
+    profiles: ["banco"]
+
+volumes:
+  banco:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=${ARGOS_BANCO_TMPFS:-4g}"
+  # Caché de dependencias de Maven entre corridas; `banco-rostro.sh limpiar --todo` la borra.
+  m2:
