@@ -24,11 +24,8 @@ services:
       OMP_NUM_THREADS: "1"
       EMOCIONES_DETECCION_MIN_CONFIANZA: "0.40"
       EMOCIONES_MAX_ROSTROS: "6"
-      # Audio de las mismas tomas (modalidad 03): la voz del canal del paciente en virtual.
-      ARGOS_BANCO_AUDIO: /audio
     volumes:
       - ${ARGOS_BANCO_DATOS:-../_datos-evaluacion/ravdess}:/datos:ro
-      - ${ARGOS_BANCO_DATOS_AUDIO:-../_datos-evaluacion/ravdess-audio}:/audio:ro
       - banco:/banco
       - ${ARGOS_BANCO_ENTRENAMIENTO:-../Argos-Entrenamiento}/models/runs:/runs
     profiles: ["banco"]
