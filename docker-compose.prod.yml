@@ -193,6 +193,10 @@ services:
       ARGOS_DIARIZACION_ENABLED: ${ARGOS_DIARIZACION_ENABLED:-false}
       # Cuanto espera la compuerta humana antes de continuar sola con los hablantes sin verificar.
       ARGOS_ESPERA_ASIGNACION_HORAS: ${ARGOS_ESPERA_ASIGNACION_HORAS:-24}
+      # ADR-038. Rastreo del rostro del paciente por cuadros; apagado, la sala manda una foto por
+      # ventana como antes. Vacío en el piloto = todos los profesionales (UUIDs separados por coma).
+      ARGOS_EMOCIONES_RASTREO_HABILITADO: ${ARGOS_EMOCIONES_RASTREO_HABILITADO:-false}
+      ARGOS_EMOCIONES_RASTREO_PILOTO: ${ARGOS_EMOCIONES_RASTREO_PILOTO:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
     volumes:
       - argos-profile-uploads:/app/uploads/perfiles
