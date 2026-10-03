@@ -22,7 +22,8 @@
 #   scripts/banco-rostro.sh limpiar [--todo] borra el volumen tmpfs y las imágenes huérfanas del banco;
 #                                            con --todo también la imagen del banco, la de Maven y su caché
 #
-# Variables: ARGOS_BANCO_DATOS (RAVDESS, solo lectura), ARGOS_BANCO_ENTRENAMIENTO, ARGOS_BANCO_BACKEND,
+# Variables: ARGOS_BANCO_DATOS (RAVDESS, solo lectura), ARGOS_BANCO_DATOS_AUDIO (el audio de las mismas
+# tomas, por defecto <ARGOS_BANCO_DATOS>-audio), ARGOS_BANCO_ENTRENAMIENTO, ARGOS_BANCO_BACKEND,
 # ARGOS_BANCO_PROCESOS (8), ARGOS_BANCO_TMPFS (4g), ARGOS_BANCO_CORRIDA (rastreo-rostro-<fecha>),
 # ARGOS_BANCO_DISCO_MINIMO_GB (6), ARGOS_BANCO_CONSERVAR=1 no borra el tmpfs al terminar (depuración),
 # ARGOS_BANCO_CALIBRACION (el metrics.json de la calibración, en lugar del argumento del holdout),
@@ -35,7 +36,8 @@ cd "$(dirname "$0")/.."
 ARGOS_BANCO_ENTRENAMIENTO="$(cd "${ARGOS_BANCO_ENTRENAMIENTO:-../Argos-Entrenamiento}" && pwd)"
 ARGOS_BANCO_BACKEND="$(cd "${ARGOS_BANCO_BACKEND:-../Argos-Backend}" && pwd)"
 ARGOS_BANCO_DATOS="$(cd "${ARGOS_BANCO_DATOS:-../_datos-evaluacion/ravdess}" && pwd)"
-export ARGOS_BANCO_ENTRENAMIENTO ARGOS_BANCO_BACKEND ARGOS_BANCO_DATOS
+ARGOS_BANCO_DATOS_AUDIO="$(cd "${ARGOS_BANCO_DATOS_AUDIO:-${ARGOS_BANCO_DATOS}-audio}" && pwd)"
+export ARGOS_BANCO_ENTRENAMIENTO ARGOS_BANCO_BACKEND ARGOS_BANCO_DATOS ARGOS_BANCO_DATOS_AUDIO
 PROCESOS="${ARGOS_BANCO_PROCESOS:-8}"
 CORRIDA="${ARGOS_BANCO_CORRIDA:-rastreo-rostro-$(date +%Y-%m-%d)}"
 DISCO_MINIMO_GB="${ARGOS_BANCO_DISCO_MINIMO_GB:-6}"
