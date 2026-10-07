@@ -275,3 +275,93 @@ resource "aws_autoscaling_group" "inferencia" {
     ignore_changes = [desired_capacity]
   }
 }
+
+# El host GPU se enciende cada vez que la app pasa a running, la arranque quien la arranque: Operate
+# MVP, un deploy o la consola. El 06/10 un deploy encendió la app sin la GPU y la demo transcribió en
+# CPU. Apagarlo sigue siendo del vigía del host.
+data "archive_file" "encender_inferencia" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/encender_inferencia.py"
+  output_path = "${path.module}/.build/encender_inferencia.zip"
+}
+
+resource "aws_iam_role" "encender_inferencia" {
+  name = "argos-encender-inferencia"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "encender_inferencia" {
+  name = "argos-encender-inferencia"
+  role = aws_iam_role.encender_inferencia.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "autoscaling:SetDesiredCapacity"
+        Resource = "arn:aws:autoscaling:${var.region}:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.nombre_inferencia}"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.encender_inferencia.arn}:*"
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "encender_inferencia" {
+  name              = "/aws/lambda/argos-encender-inferencia"
+  retention_in_days = 7
+}
+
+resource "aws_lambda_function" "encender_inferencia" {
+  function_name    = "argos-encender-inferencia"
+  filename         = data.archive_file.encender_inferencia.output_path
+  source_code_hash = data.archive_file.encender_inferencia.output_base64sha256
+  role             = aws_iam_role.encender_inferencia.arn
+  handler          = "encender_inferencia.handler"
+  runtime          = "python3.13"
+  timeout          = 15
+  memory_size      = 128
+  environment {
+    variables = {
+      ASG_INFERENCIA = local.nombre_inferencia
+      INSTANCIA_APP  = aws_instance.app.id
+    }
+  }
+  depends_on = [aws_cloudwatch_log_group.encender_inferencia]
+}
+
+resource "aws_cloudwatch_event_rule" "app_encendida" {
+  name        = "argos-app-encendida"
+  description = "La app pasa a running: encender el host GPU"
+  event_pattern = jsonencode({
+    source        = ["aws.ec2"]
+    "detail-type" = ["EC2 Instance State-change Notification"]
+    detail = {
+      "instance-id" = [aws_instance.app.id]
+      state         = ["running"]
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "app_encendida" {
+  rule = aws_cloudwatch_event_rule.app_encendida.name
+  arn  = aws_lambda_function.encender_inferencia.arn
+}
+
+resource "aws_lambda_permission" "app_encendida" {
+  statement_id  = "AllowEventBridgeAppEncendida"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.encender_inferencia.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.app_encendida.arn
+}
