@@ -1,0 +1,13 @@
+{
+  "name": "argos-spike-sala-livekit",
+  "private": true,
+  "type": "module",
+  "description": "Spike WP0 / ADR-041: dos Chrome con medios simulados en una sala LiveKit; valida la grabación por canal y la reconexión.",
+  "scripts": {
+    "spike": "node correr.mjs"
+  },
+  "dependencies": {
+    "livekit-client": "2.22.3",
+    "playwright": "1.63.0"
+  }
+}

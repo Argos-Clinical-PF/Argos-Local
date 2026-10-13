@@ -16,3 +16,7 @@ terraform/argos-deploy.pub
 
 # Ajustes locales de cada desarrollador: nunca se versionan.
 docker-compose.override.yml
+
+# Dependencias del spike de la sala virtual (se instalan con npm install en esa carpeta).
+scripts/spike-sala-livekit/node_modules/
+scripts/spike-sala-livekit/package-lock.json
