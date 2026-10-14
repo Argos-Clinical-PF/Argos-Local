@@ -82,6 +82,12 @@ services:
       ARGOS_EMOCIONES_RASTREO_HABILITADO: ${ARGOS_EMOCIONES_RASTREO_HABILITADO:-false}
       ARGOS_EMOCIONES_RASTREO_PILOTO: ${ARGOS_EMOCIONES_RASTREO_PILOTO:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
+      # Sala virtual integrada (ADR-041). El backend solo firma los tokens de acceso: no habla
+      # con LiveKit. LIVEKIT_URL es la que usa el NAVEGADOR, por eso apunta a localhost y no al
+      # nombre del servicio. Las claves por defecto son las del modo --dev de LiveKit.
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://localhost:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -217,6 +223,21 @@ services:
       timeout: 5s
       retries: 20
       start_period: 60s
+    restart: unless-stopped
+
+  # Sala virtual integrada (ADR-041): servidor WebRTC (SFU) para las sesiones virtuales con
+  # Sala ARGOS. En local corre en modo --dev: claves fijas devkey/secret, sin TURN ni TLS.
+  # --node-ip 127.0.0.1 hace que anuncie localhost como candidato ICE, que es por donde el
+  # navegador del host llega al puerto UDP publicado. En produccion corre con su propio
+  # livekit.yaml, TURN y certificado (ver docker-compose.prod.yml y DEPLOY.md).
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    container_name: argos-livekit
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"]
+    ports:
+      - "${LIVEKIT_PORT:-7880}:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
     restart: unless-stopped
 
 volumes:

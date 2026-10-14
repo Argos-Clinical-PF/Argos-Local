@@ -1,0 +1,84 @@
+<!doctype html><meta charset="utf-8"><title>spike sala</title>
+<video id="remoto" autoplay playsinline muted width="320"></video>
+<script type="module">
+import { Room, RoomEvent, Track } from './node_modules/livekit-client/dist/livekit-client.esm.mjs'
+const q = new URLSearchParams(location.search)
+const rol = q.get('rol'), token = q.get('token')
+const R = window.resultados = { rol, eventos: [], chunks: [], frames: [], errores: [] }
+const ev = (e) => R.eventos.push({ t: Math.round(performance.now()), e })
+const room = new Room({ adaptiveStream: false, dynacast: false })
+window.room = room
+const DURACION_CHUNK_MS = 4000
+let nroChunk = 0
+const grabadores = new Map()   // canal -> { activo }
+
+// Igual que GrabacionSesion.loop(): un MediaRecorder por canal que se reinicia en cada ventana,
+// así cada chunk es un webm/opus autónomo.
+function iniciarCanal(canal, mediaStreamTrack) {
+  const estado = { activo: true }
+  grabadores.set(canal, estado)
+  const stream = new MediaStream([mediaStreamTrack])
+  const ventana = () => {
+    if (!estado.activo || mediaStreamTrack.readyState !== 'live') { ev(`fin canal ${canal}`); return }
+    const rec = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+    const partes = []
+    const n = ++nroChunk
+    rec.ondataavailable = (e) => e.data.size && partes.push(e.data)
+    rec.onstop = async () => {
+      const blob = new Blob(partes, { type: 'audio/webm' })
+      let dur = null
+      try { const ctx = new AudioContext(); dur = (await ctx.decodeAudioData(await blob.arrayBuffer())).duration; ctx.close() } catch (e) { R.errores.push(`decode ${canal} #${n}: ${e}`) }
+      R.chunks.push({ n, canal, bytes: blob.size, durSeg: dur && +dur.toFixed(2) })
+      ventana()
+    }
+    rec.start()
+    setTimeout(() => rec.state !== 'inactive' && rec.stop(), DURACION_CHUNK_MS)
+  }
+  ventana()
+}
+function detenerCanal(canal) { const g = grabadores.get(canal); if (g) g.activo = false }
+
+// Igual que capturarSnapshot(): un JPEG del <video> cada 4 s.
+function iniciarFrames() {
+  const v = document.getElementById('remoto'); const c = document.createElement('canvas')
+  let n = 0
+  setInterval(() => {
+    if (!v.srcObject || v.videoWidth === 0) return
+    c.width = 640; c.height = Math.round(640 * v.videoHeight / v.videoWidth)
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height)
+    c.toBlob((b) => R.frames.push({ n: ++n, bytes: b.size, w: c.width, h: c.height }), 'image/jpeg', 0.75)
+  }, DURACION_CHUNK_MS)
+}
+
+room.on(RoomEvent.Reconnecting, () => ev('reconectando'))
+room.on(RoomEvent.Reconnected, () => ev('reconectado'))
+room.on(RoomEvent.ParticipantDisconnected, (p) => ev(`salió ${p.identity}`))
+room.on(RoomEvent.ParticipantConnected, (p) => ev(`entró ${p.identity}`))
+if (rol === 'profesional') {
+  room.on(RoomEvent.TrackSubscribed, (track, _pub, p) => {
+    ev(`suscripto ${track.kind} de ${p.identity}`)
+    if (track.kind === Track.Kind.Audio) {
+      // El profesional tiene que ESCUCHAR al paciente: se reproduce en un <audio> (lo que hace
+      // RoomAudioRenderer). Variante ?sinAudio=1 para reproducir el hallazgo sin reproductor.
+      if (!q.get('sinAudio')) document.body.appendChild(track.attach())
+      iniciarCanal('AUDIO_COMPARTIDO_PACIENTE', track.mediaStreamTrack)
+    }
+    if (track.kind === Track.Kind.Video) document.getElementById('remoto').srcObject = new MediaStream([track.mediaStreamTrack])
+  })
+  room.on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => {
+    ev(`desuscripto ${track.kind} de ${p.identity}`)
+    if (track.kind === Track.Kind.Audio) detenerCanal('AUDIO_COMPARTIDO_PACIENTE')
+  })
+  iniciarFrames()
+}
+try {
+  await room.connect(q.get('url'), token)
+  ev('conectado')
+  await room.localParticipant.enableCameraAndMicrophone()
+  ev('publicando cámara y micrófono')
+  if (rol === 'profesional') {
+    const mic = room.localParticipant.getTrackPublication(Track.Source.Microphone).track.mediaStreamTrack
+    iniciarCanal('MICROFONO_PROFESIONAL', mic.clone())   // clon: el grabador no interfiere con la publicación
+  }
+} catch (e) { R.errores.push(String(e)); ev('error ' + e) }
+</script>
