@@ -357,6 +357,51 @@ de producción. El backend de prueba escucha solo en `127.0.0.1:8081` de la inst
 Si la transcripción no pasa, se bajan los presupuestos de `CPU_COMPARTIDA`
 (`argos.emociones.rastreo.presupuesto.cpu-compartida`) hacia los de `PROTECCION`.
 
+## Sala ARGOS: LiveKit en la EC2 (ADR-041, WP9)
+
+La videollamada integrada corre como un contenedor más (`livekit`, perfil `sala` de
+`docker-compose.prod.yml`). El media **no pasa por CloudFront**:
+
+| Qué | Por dónde |
+|---|---|
+| Señalización (WebSocket) | `wss://rtc.<dominio>` → Caddy (443) → `livekit:7880` en la red del host |
+| Media | UDP 50000-60000 directo a la Elastic IP; TCP 7881 si la red bloquea UDP |
+| TURN | UDP 3478 y TLS 5349, con relay en UDP 40000-40999 |
+
+Terraform crea el registro `rtc.<dominio>`, abre esos puertos en el security group y suma
+`wss://rtc.<dominio>` a la `connect-src` de la CSP. El 7880 no se abre: solo entra por Caddy.
+
+**Habilitarla.** Sin las claves en SSM, el perfil no se activa, el backend responde
+`SALA_NO_CONFIGURADA` y los profesionales usan la videollamada externa:
+
+```bash
+aws ssm put-parameter --name /argos/mvp/livekit-api-key \
+  --value "argos-$(openssl rand -hex 4)" --type SecureString --overwrite
+# El backend se niega a arrancar con un secreto de menos de 32 caracteres (ValidadorSecretos).
+aws ssm put-parameter --name /argos/mvp/livekit-api-secret \
+  --value "$(openssl rand -hex 32)" --type SecureString --overwrite
+# opcional: otro host para la señalización (por defecto rtc.<dominio de PUBLIC_BASE_URL>)
+aws ssm put-parameter --name /argos/mvp/rtc-host --value "rtc.argosclinical.online" --type String --overwrite
+# terraform apply (DNS, puertos, CSP) y volver a desplegar para regenerar el .env
+```
+
+**Orden de despliegue:** `terraform apply` primero (sin el DNS, Caddy no consigue el certificado de
+`rtc.`), después `Argos-Local` a `main`, el backend y por último el frontend. Un frontend nuevo con la
+sala deshabilitada ofrece la videollamada externa desde la preparación.
+
+**El certificado del TURN.** LiveKit usa el que Caddy saca para `rtc.<dominio>` (volumen
+`argos-caddy-data`, solo lectura) y lo lee al arrancar. En el primer despliegue el contenedor se
+reinicia hasta que Caddy lo obtiene; después de una renovación hay que reiniciar `argos-livekit` (la
+EC2 se apaga y prende con cada demo, así que en la práctica se recarga solo).
+
+**Probarla.** `curl https://rtc.<dominio>` responde `OK`. La conectividad real (4G con CGNAT, Wi-Fi
+hogareño y corporativo con UDP bloqueado) se registra antes del control del 30/10 (ARGOS-243). Si
+alguna red crítica no conecta, la contingencia es LiveKit Cloud con el mismo SDK (ADR-041): cambiar
+`LIVEKIT_URL`, `livekit-api-key` y `livekit-api-secret`; no se configura de antemano.
+
+**Costo.** El contenedor usa la misma EC2, que ya está encendida durante la sesión; el tráfico de una
+sesión 1:1 entra en los 100 GB mensuales gratuitos de salida.
+
 ## Operación diaria
 
 Para una demo:

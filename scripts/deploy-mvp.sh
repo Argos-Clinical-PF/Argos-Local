@@ -99,6 +99,19 @@ umask 077
     printf 'CORS_ALLOWED_ORIGINS=%s,%s,https://%s\n' \
       "$PUBLIC_BASE_URL" "$ORIGIN_BASE_URL" "$PUBLIC_IP"
   fi
+  # Sala ARGOS (ADR-041): rtc.<dominio> apunta a la Elastic IP (Terraform). Con las claves en SSM se
+  # activa el servicio livekit y el backend firma los accesos; sin ellas, solo videollamada externa.
+  RTC_HOST="$(get_parameter_optional rtc-host)"
+  RTC_HOST="${RTC_HOST:-rtc.${PUBLIC_BASE_URL#https://}}"
+  printf 'RTC_HOST=%s\n' "$RTC_HOST"
+  LIVEKIT_API_KEY="$(get_parameter_optional livekit-api-key)"
+  LIVEKIT_API_SECRET="$(get_parameter_optional livekit-api-secret)"
+  if [ -n "$LIVEKIT_API_KEY" ] && [ -n "$LIVEKIT_API_SECRET" ]; then
+    printf 'COMPOSE_PROFILES=sala\n'
+    printf 'LIVEKIT_URL=wss://%s\n' "$RTC_HOST"
+    printf 'LIVEKIT_API_KEY=%s\n' "$LIVEKIT_API_KEY"
+    printf 'LIVEKIT_API_SECRET=%s\n' "$LIVEKIT_API_SECRET"
+  fi
   printf 'POSTGRES_DB=argos_clinical\n'
   printf 'POSTGRES_USER=argos_app\n'
   printf 'POSTGRES_PASSWORD=%s\n' "$(get_parameter postgres-password)"

@@ -83,6 +83,43 @@ resource "aws_security_group" "ec2" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  # Sala ARGOS (ADR-041, WP9): el media de LiveKit va directo a la EC2, sin CloudFront. La
+  # señalización entra por el 443 (Caddy en rtc.<dominio>); el puerto 7880 no se abre.
+  ingress {
+    description = "LiveKit RTC sobre UDP"
+    from_port   = 50000
+    to_port     = 60000
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "LiveKit ICE sobre TCP, para redes que bloquean UDP"
+    from_port   = 7881
+    to_port     = 7881
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "TURN/UDP embebido de LiveKit"
+    from_port   = 3478
+    to_port     = 3478
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "Puertos de relay del TURN de LiveKit"
+    from_port   = 40000
+    to_port     = 40999
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "TURN/TLS embebido de LiveKit"
+    from_port   = 5349
+    to_port     = 5349
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
   egress {
     from_port   = 0
     to_port     = 0
@@ -206,6 +243,8 @@ locals {
   www_domain    = "www.${var.domain_name}"
   origin_domain = "origin.${var.domain_name}"
   origin_url    = "https://${local.origin_domain}"
+  # Sala ARGOS (ADR-041): señalización de LiveKit, directo a la Elastic IP.
+  rtc_domain = "rtc.${var.domain_name}"
 }
 
 data "aws_cloudfront_cache_policy" "sin_cache" {
@@ -233,7 +272,7 @@ locals {
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "media-src 'self' blob: ${local.origenes_grabaciones}",
-    "connect-src 'self' ${local.origenes_grabaciones} https://countriesnow.space https://apis.datos.gob.ar",
+    "connect-src 'self' ${local.origenes_grabaciones} https://countriesnow.space https://apis.datos.gob.ar wss://${local.rtc_domain} https://${local.rtc_domain}",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -309,6 +348,16 @@ resource "aws_acm_certificate_validation" "app" {
 resource "aws_route53_record" "origin" {
   zone_id = aws_route53_zone.app.zone_id
   name    = local.origin_domain
+  type    = "A"
+  ttl     = 60
+  records = [aws_eip.app.public_ip]
+}
+
+# Sala ARGOS (ADR-041): el navegador abre el WebSocket de LiveKit contra la EC2, sin pasar por
+# CloudFront (que no transporta WebRTC). Caddy saca el certificado de este host.
+resource "aws_route53_record" "rtc" {
+  zone_id = aws_route53_zone.app.zone_id
+  name    = local.rtc_domain
   type    = "A"
   ttl     = 60
   records = [aws_eip.app.public_ip]
