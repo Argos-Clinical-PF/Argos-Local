@@ -24,3 +24,13 @@ https://{$PUBLIC_IP} {
 
 	import app
 }
+
+# Sala ARGOS (ADR-041): la señalización de LiveKit va directo a la Elastic IP, sin CloudFront. El
+# certificado de este host también lo usa el TURN embebido de LiveKit (ver docker-compose.prod.yml).
+{$RTC_HOST} {
+	tls {
+		protocols tls1.2 tls1.3
+	}
+
+	reverse_proxy host.docker.internal:7880
+}
