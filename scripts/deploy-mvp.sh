@@ -186,6 +186,11 @@ umask 077
   #   aws ssm put-parameter --name /argos/mvp/emociones-rastreo-habilitado --value true --type String --overwrite
   printf 'ARGOS_EMOCIONES_RASTREO_HABILITADO=%s\n' "$RASTREO_HABILITADO"
   printf 'ARGOS_EMOCIONES_RASTREO_PILOTO=%s\n' "$RASTREO_PILOTO"
+  # Mercado Pago producción (ARGOS-256): credenciales de SSM y variables de pasarela
+  printf 'MERCADOPAGO_ACCESS_TOKEN=%s\n' "$(get_parameter_optional mercadopago-access-token)"
+  printf 'MERCADOPAGO_WEBHOOK_SECRET=%s\n' "$(get_parameter_optional mercadopago-webhook-secret)"
+  printf 'MERCADOPAGO_SANDBOX=false\n'
+  printf 'APP_BACKEND_BASE_URL=%s\n' "$PUBLIC_BASE_URL"
   printf 'CADDYFILE_SHA256=%s\n' "$(sha256sum Caddyfile | cut -d' ' -f1)"
   printf 'CADDYFILE_MODELOS_SHA256=%s\n' "$(sha256sum Caddyfile.modelos | cut -d' ' -f1)"
 } > .env

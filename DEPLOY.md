@@ -110,9 +110,23 @@ mail-username
 mail-password
 whisper-model
 secreto-origen-cloudfront
+mercadopago-access-token
+mercadopago-webhook-secret
 ```
 
 Nunca guardar estos valores en GitHub, archivos versionados ni salidas de CI.
+
+### Credenciales de Producción de Mercado Pago
+
+Para habilitar el cobro real de suscripciones (ARGOS-256), se configuran las credenciales productivas de la cuenta del titular obtenidas en «Tus integraciones» de Mercado Pago:
+
+```bash
+aws ssm put-parameter --region us-east-1 --name /argos/mvp/mercadopago-access-token --type SecureString --value "APP_USR-..."
+aws ssm put-parameter --region us-east-1 --name /argos/mvp/mercadopago-webhook-secret --type SecureString --value "..."
+```
+
+El script `deploy-mvp.sh` inyecta automáticamente estos valores en el `.env` del backend junto con `MERCADOPAGO_SANDBOX=false` y `APP_BACKEND_BASE_URL`.
+
 
 ### Secreto de origen de CloudFront
 

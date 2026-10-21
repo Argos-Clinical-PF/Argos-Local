@@ -20,6 +20,7 @@ jobs:
       RECORDINGS_BUCKET: argos-validation
       PUBLIC_BASE_URL: https://argos.example
       PUBLIC_HOST: argos.example
+      RTC_HOST: rtc.argos.example
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +35,7 @@ jobs:
           docker run --rm \
             -e PUBLIC_IP=192.0.2.10 \
             -e PUBLIC_HOST=example.test \
+            -e RTC_HOST=rtc.example.test \
             -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2.10-alpine \
             caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --pretty \
