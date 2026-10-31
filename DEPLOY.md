@@ -4,7 +4,7 @@
 
 ```text
 GitHub Actions (OIDC) -> ECR -> SSM -> EC2 c7i.2xlarge
-Usuario -> HTTPS argosclinical.online -> CloudFront (+ AWS WAF) -> origin.argosclinical.online
+Usuario -> HTTPS argosclinical.online -> CloudFront -> origin.argosclinical.online
         -> EIP -> Caddy -> Nginx frontend -> backend -> PostgreSQL
                                                  \-> emociones
                                                  \-> enrutador de modelos -> host GPU o Whisper en CPU
@@ -12,15 +12,14 @@ Usuario -> HTTPS argosclinical.online -> CloudFront (+ AWS WAF) -> origin.argosc
 
 > **CloudFront está delante de todo desde el 2026-08-06.** `argosclinical.online` no resuelve al
 > EC2: resuelve a CloudFront, que reenvía al origen. Un 4xx que no aparezca en los logs del backend
-> probablemente lo generó CloudFront o su WAF. Ver
+> probablemente lo generó CloudFront. La distribución de la cuenta actual no tiene WAF: ver
 > [«AWS WAF y las rutas de subida»](#aws-waf-y-las-rutas-de-subida) más abajo y
 > [ADR-023](../Argos-Documentacion/ADRs/ARGOS_ADR_023_Arquitectura_AWS_y_Dominio.md).
 
 - No requiere ALB, SSH ni credenciales AWS guardadas en GitHub.
-- `sslip.io` resuelve gratuitamente un hostname basado en la EIP, y sigue sirviendo como acceso
-  directo al origen, sin pasar por CloudFront — útil justamente para descartar al borde cuando algo
-  falla.
-- Caddy obtiene y renueva automáticamente un certificado público y exige TLS 1.3.
+- `origin.argosclinical.online` es el acceso directo al origen, sin pasar por CloudFront: sirve para
+  descartar al borde cuando algo falla.
+- Caddy obtiene y renueva automáticamente un certificado público y acepta TLS 1.2 y 1.3.
 - PostgreSQL, backend y transcripción no publican puertos al exterior.
 - La instancia compute-optimized aporta 8 vCPU sostenidas para la inferencia CPU
   y permanece detenida fuera de demos.
@@ -104,15 +103,33 @@ Los secretos se almacenan cifrados en Parameter Store bajo `/argos/mvp/`:
 
 ```text
 public-base-url
+origin-base-url
 postgres-password
 jwt-secret
+encryption-key
 mail-username
 mail-password
-whisper-model
+admin-seed-email
+admin-seed-password
 secreto-origen-cloudfront
+anthropic-api-key
 mercadopago-access-token
 mercadopago-webhook-secret
+livekit-api-key
+livekit-api-secret
 ```
+
+Y estas banderas y modelos, con su valor en producción al 2026-10-31:
+
+| Parámetro | Valor |
+|---|---|
+| `ia-proveedor` | `BEDROCK` |
+| `ia-bedrock-modelo-nota` | `us.anthropic.claude-sonnet-4-6` |
+| `ia-bedrock-modelo-temas` | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| `whisper-model` | `small` |
+| `whisper-refinement-model` | `large-v3-turbo` |
+| `diarizacion-enabled` | `true` |
+| `emociones-rastreo-habilitado` | `true` |
 
 Nunca guardar estos valores en GitHub, archivos versionados ni salidas de CI.
 
@@ -157,9 +174,9 @@ Cada repositorio de servicio contiene `.github/workflows/ci-cd.yml`:
 
 `Argos-Local` contiene:
 
-- `Deploy MVP`: despliegue completo manual o ante cambios del Compose.
-- `Operate MVP`: iniciar, detener o consultar el estado de la instancia.
-- `Release MVP`: workflow reutilizable por los servicios, con manifiesto y rollback.
+- `Release MVP` (`deploy.yml`): workflow reutilizable por los servicios, con manifiesto y rollback.
+  También corre a mano y ante cambios del Compose, los Caddyfile o el script de deploy.
+- `Operate MVP` (`operate.yml`): iniciar, detener o consultar el estado de la instancia y del host GPU.
 
 ## El Compose que manda es `docker-compose.prod.yml`
 
@@ -182,17 +199,40 @@ deroga ambos ADRs.
 
 ## AWS WAF y las rutas de subida
 
-**Síntoma a reconocer:** la app funciona, pero **solo** fallan con `403` el envío de audio, el envío
-de frames de video y la subida de foto de perfil. En la sala se ve "análisis facial: modelo no
-disponible" y la transcripción no avanza. **En los logs del backend no hay nada**, porque la request
-nunca llegó al EC2.
+**Hoy no hay WAF.** La distribución `E1NVBUHYJC6UL0` no tiene WebACL y `waf_habilitado` está en
+`false`, de modo que un `403` en una subida no viene de un WAF de esta cuenta. El borde queda sin esa
+protección: hay que revisarlo antes de procesar pacientes reales (ADR-023).
 
-Si eso pasa, el culpable es el WAF de CloudFront, no los modelos. Diagnóstico en un comando —el
-tamaño del cuerpo es lo único que cambia entre las dos pruebas:
+### Encenderlo
+
+Un WebACL propio cuesta del orden de USD 9 por mes. Se activa con `waf_habilitado = true` en
+`terraform.tfvars` y `terraform apply`. Terraform crea `argos-web-acl` con:
+
+- una regla `Allow` para las tres rutas multipart: `/api/sessions/{id}/transcripcion`,
+  `/api/sessions/{id}/analisis-emocional/video` y `/api/perfil/foto`;
+- los tres grupos administrados de AWS: `AmazonIpReputationList`, `CommonRuleSet` y
+  `KnownBadInputsRuleSet`;
+- en `Count`, las reglas que inspeccionan el cuerpo (`SizeRestrictions_BODY` y las demás `*_BODY`).
+
+### No crearlo desde el asistente de CloudFront
+
+La cuenta anterior tuvo ese problema: el asistente puso `CommonRuleSet` en `Block`, y
+`SizeRestrictions_BODY` rechaza con `403` todo cuerpo mayor a 8.192 bytes. Fallaban **solo** el audio,
+los frames de video y la foto de perfil, sin nada en los logs del backend, y la sala mostraba
+«análisis facial: modelo no disponible».
+
+Además, ese WebACL queda atado a un **plan de precios** de CloudFront: no admite reglas propias, la
+distribución no puede quitarlo ni cambiarlo, y la suscripción solo se cancela desde la consola. La
+historia completa está en
+[ADR-023](../Argos-Documentacion/ADRs/ARGOS_ADR_023_Arquitectura_AWS_y_Dominio.md).
+
+### Diagnóstico si vuelve a aparecer
+
+El tamaño del cuerpo es lo único que cambia entre las dos pruebas:
 
 ```bash
 head -c 8000  /dev/zero | tr '\0' a > /tmp/chico.bin   # 8 KB  -> debe pasar
-head -c 30000 /dev/zero | tr '\0' a > /tmp/grande.bin  # 30 KB -> si da 403, es el WAF
+head -c 30000 /dev/zero | tr '\0' a > /tmp/grande.bin  # 30 KB -> si da 403, es un WAF
 for f in chico grande; do
   printf '%s -> ' "$f"
   curl -s -o /dev/null -w '%{http_code}\n' -X POST \
@@ -200,62 +240,12 @@ for f in chico grande; do
 done
 ```
 
-Un `403` solo en el grande confirma `SizeRestrictions_BODY` del `AWSManagedRulesCommonRuleSet`, que
-rechaza cualquier cuerpo mayor a 8.192 bytes. La confirmación en métricas:
-
-```bash
-aws cloudwatch get-metric-statistics --namespace AWS/WAFV2 \
-  --metric-name BlockedRequests --region us-east-1 \
-  --dimensions Name=WebACL,Value=CreatedByCloudFront-8f1a9620 \
-               Name=ManagedRuleGroup,Value=AWSManagedRulesCommonRuleSet \
-               Name=ManagedRuleGroupRule,Value=SizeRestrictions_BODY \
-  --start-time "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" \
-  --end-time   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --period 3600 --statistics Sum --output text
-```
-
-### Reparación
-
-El WebACL vigente (`CreatedByCloudFront-8f1a9620`, scope `CLOUDFRONT`, siempre `us-east-1`) tiene
-**todas** las reglas de los tres grupos administrados en `Count`: observa y publica métricas, no
-bloquea. Si alguien lo recrea desde el asistente de CloudFront, vuelven a quedar en `Block` y las
-subidas se rompen otra vez.
-
-Para volver a dejarlas en `Count`, en la consola de AWS WAF: **Web ACLs → scope CloudFront → el
-WebACL → cada grupo administrado → Edit → poner todas las reglas en `Count`**.
-
-Por CLI se puede hacer con `aws wafv2 update-web-acl`, agregando un `RuleActionOverrides` por regla
-dentro de cada `ManagedRuleGroupStatement`. Respaldar primero, porque `update-web-acl` reemplaza la
-definición completa:
-
-```bash
-aws wafv2 get-web-acl --scope CLOUDFRONT --region us-east-1 \
-  --name CreatedByCloudFront-8f1a9620 \
-  --id 61db0a66-3b9d-4224-a1d0-5b13007a1a83 > /tmp/webacl-backup.json
-```
-
-El `LockToken` hay que releerlo justo antes de cada `update-web-acl`: cambia con cada modificación.
-
-### Dos límites que cuestan horas si no se saben de antemano
-
-El WebACL creado por el asistente de CloudFront está atado a un **plan de precios** que restringe
-qué se le puede hacer:
-
-1. **No admite reglas propias.** Escribir una regla `Allow` que exceptúe las rutas de subida —que
-   sería la solución quirúrgica— falla con `WAFFeatureNotIncludedInPricingPlanException`:
-   `String match statement` pide plan PRO y `Regex match statement` pide plan BUSINESS.
-2. **La distribución no puede quedarse sin WebACL, ni cambiarlo.** `UpdateDistribution` responde
-   `You can't remove or replace the web ACL for your distribution. Distributions with a pricing
-   plan subscription must have a web ACL resource.`
-
-La suscripción **no tiene API**: no hay operación para cancelarla ni en CloudFront ni en WAFv2. Solo
-se cancela desde la consola, en **CloudFront → Distributions → `E2E1XIDYBFNZI9` → Security**. Recién
-después se puede quitar el WebACL o reemplazarlo por uno propio.
+Un `403` solo en el grande apunta a una regla de tamaño de cuerpo.
 
 ## Agrupamiento de voces (ARGOS-110 / ADR-026)
 
-Apagado por defecto. Enciende dos cosas a la vez: el agrupamiento de voces en sesiones
-presenciales, y la **compuerta** que frena la nota clínica hasta que el profesional dice qué grupo
+**Encendido en producción.** El default del código es apagado. Enciende dos cosas a la vez: el
+agrupamiento de voces en sesiones presenciales, y la **compuerta** que frena la nota clínica hasta que el profesional dice qué grupo
 es el paciente.
 
 La bandera **sale de SSM, no de una variable de entorno**: el workflow de deploy invoca
@@ -289,7 +279,8 @@ tasa de abstención, la cobertura, la distribución del margen contra el 0,30 ad
 
 ## Rastreo del rostro por cuadros (ADR-038)
 
-Apagado por defecto. Encendido, la sala manda cuadros de la vista del paciente (entre 2,5 y 5 por
+**Encendido en producción para todos los profesionales**, con riesgo aceptado en ADR-038. El default
+del código es apagado. Encendido, la sala manda cuadros de la vista del paciente (entre 2,5 y 5 por
 segundo) en vez de una foto por ventana de 4 s, el backend sigue el rostro del paciente y una
 ventana solo se lee con los cuadros en los que el rastro está confirmado, continuo y sin tapar.
 
@@ -409,7 +400,7 @@ reinicia hasta que Caddy lo obtiene; después de una renovación hay que reinici
 EC2 se apaga y prende con cada demo, así que en la práctica se recarga solo).
 
 **Probarla.** `curl https://rtc.<dominio>` responde `OK`. La conectividad real (4G con CGNAT, Wi-Fi
-hogareño y corporativo con UDP bloqueado) se registra antes del control del 30/10 (ARGOS-243). Si
+hogareño y corporativo con UDP bloqueado) se registra en ARGOS-243. Si
 alguna red crítica no conecta, la contingencia es LiveKit Cloud con el mismo SDK (ADR-041): cambiar
 `LIVEKIT_URL`, `livekit-api-key` y `livekit-api-secret`; no se configura de antemano.
 
@@ -431,7 +422,7 @@ Para una demo:
 3. Esperar que el workflow finalice. El arranque de EC2, Docker y los modelos
    puede tardar entre cuatro y ocho minutos; `running` no significa todavía que
    la aplicación esté saludable.
-4. Abrir `https://32-193-249-170.sslip.io` solamente después del smoke test.
+4. Abrir `https://argosclinical.online` solamente después del smoke test.
 5. Al terminar, ejecutar `Operate MVP` con acción `stop`. Igual que Release MVP, antes consulta
    `/api/health/deployment-safety`: con sesiones, cargas o jobs post-sesión activos, o si no puede
    confirmarlo, falla sin detener nada. Esperar a que terminen, o relanzar con `forzar=true`
@@ -445,7 +436,7 @@ La consola de EC2 también puede iniciar la instancia, pero no espera el health
 de la aplicación. Los workflows de release la detienen siempre al finalizar,
 incluso si el despliegue falla.
 
-También se puede desplegar manualmente desde `Deploy MVP`, seleccionando los
+También se puede desplegar manualmente desde `Release MVP`, seleccionando los
 tags deseados y si la EC2 debe detenerse después de validar.
 
 ## La EC2 se detiene sola después de cada release
