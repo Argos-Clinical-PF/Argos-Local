@@ -492,15 +492,19 @@ con `status`).
    responde, no hay sesión que proteger y sigue. Si el workflow tuvo que encender la EC2, el gate se
    omite: recién encendida no puede haber una sesión en vivo. Una sesión que quedó `EN_CURSO`
    porque nadie la finalizó también bloquea: finalizarla desde la app o usar `forzar=true`.
-2. Copia el bundle, que el workflow dejó en `/home/ec2-user/argos/entrante/`, a la carpeta de la
+2. **Configuración de IA.** Lee de SSM `ia-proveedor`, `ia-bedrock-modelo-nota` e
+   `ia-bedrock-modelo-temas`. Si alguno no se puede leer, si el proveedor no es `BEDROCK` o si un
+   modelo no es un perfil de inferencia `us.`, sale con código 78 sin tocar nada: el run falla con
+   «Deploy cancelado» y no revierte. Corregir el parámetro y relanzar.
+3. Copia el bundle, que el workflow dejó en `/home/ec2-user/argos/entrante/`, a la carpeta de la
    app: un deploy cancelado no deja un `Caddyfile` ni un compose sin desplegar junto al `.env`
    viejo. Regenera el `.env`, baja las imágenes, toma un respaldo (dump y fotos) e instala los
    timers.
-3. `docker compose up -d --remove-orphans`, sin `down`: solo se recrean los servicios cuya imagen o
+4. `docker compose up -d --remove-orphans`, sin `down`: solo se recrean los servicios cuya imagen o
    configuración cambió, así que un release del frontend reinicia solo nginx y no Postgres ni los
    modelos. El hash del `Caddyfile` va como label del gateway para que un cambio de ese archivo
    también lo recree.
-4. Renueva el certificado de la IP solo si vence en menos de 3 días (certbot detiene el gateway
+5. Renueva el certificado de la IP solo si vence en menos de 3 días (certbot detiene el gateway
    unos segundos).
 
 ### Rollback automático
@@ -508,7 +512,8 @@ con `status`).
 Si el comando de deploy o el smoke test fallan, el workflow vuelve solo al último manifiesto
 promovido (`deploy/manifests/current.json`, que no cambió) con el bundle de ese release, repite el
 smoke test y el run termina igual en rojo. El resumen del run dice a qué release volvió. No revierte
-cuando el gate canceló el deploy (no cambió nada), cuando la acción era un `rollback` manual, ni
+cuando el gate canceló el deploy (no cambió nada), cuando la configuración de IA no es válida (el
+script del release anterior la aceptaría con la API pública), cuando la acción era un `rollback` manual, ni
 cuando el comando SSM seguía corriendo. Los bundles de `deploy/releases/` se borran a los 365
 días; los manifiestos no se borran. Si el bundle del último release promovido ya no existe, el run
 lo avisa: relanzar `Release MVP` con `action: deploy` y `service: bundle`, que toma los tags de
@@ -789,3 +794,12 @@ Mientras corre, además de la c7i.2xlarge (0,357 USD/h): g6.xlarge 0,805 USD/h, 
 g6.2xlarge 0,978 o g4dn.xlarge 0,526 (on-demand en us-east-1, septiembre de 2026), más su disco, que
 se borra con la instancia. Con el ASG en 0 quedan solo la zona privada (0,50 USD por mes) y los
 modelos en S3.
+
+
+### Copiloto orquestado (ADR-045)
+
+La síntesis nueva se activa con `/argos/mvp/copiloto-agente-habilitado=true` después de la aceptación local y del frontend compatible. Si falta el parámetro o no puede leerse, el despliegue deja esa síntesis apagada; ayuda, agenda y datos operativos siguen funcionando. `false` permite desactivarla en el siguiente deploy sin cambiar el modelo ni los permisos. No editar `.env` a mano: se regenera.
+
+El script exige el perfil de nota `us.anthropic.claude-sonnet-4-6` y el de temas `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, coherentes con la lista IAM de Terraform. Un cambio de modelo requiere revisar ambos lugares y los destinos del perfil. No hay fallback a la API pública.
+
+La preparación local de noviembre incluyó un plan dirigido a `aws_iam_role_policy.ec2_bedrock`: 0 altas, 1 actualización, 0 bajas. No se aplicó. En la promoción se debe regenerar/revisar el plan, aplicar con autorización y probar la invocación con el rol de EC2; el piloto con credenciales personales no sustituye esa comprobación. No aplicar el resto de un plan con drift para entregar este permiso.

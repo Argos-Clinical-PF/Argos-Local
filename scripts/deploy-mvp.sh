@@ -28,16 +28,6 @@ if [ "${FORZAR_DESPLIEGUE:-false}" != "true" ] \
   fi
 fi
 
-# El workflow deja el bundle nuevo en entrante/ y recién acá, pasado el gate, reemplaza los archivos
-# de la app: un deploy cancelado no deja un Caddyfile o un compose sin desplegar que el próximo
-# arranque del gateway o un restaurar-respaldo.sh tomarían con el .env viejo.
-ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ "$ORIGEN" != "$APP_DIR" ]; then
-  mkdir -p "$APP_DIR"
-  cp "$ORIGEN"/docker-compose.prod.yml "$ORIGEN"/Caddyfile "$ORIGEN"/Caddyfile.modelos "$ORIGEN"/deploy-mvp.sh "$ORIGEN"/refresh-ip-certificate.sh "$APP_DIR"/
-  chmod 700 "$APP_DIR"/deploy-mvp.sh "$APP_DIR"/refresh-ip-certificate.sh
-fi
-
 get_parameter() {
   aws ssm get-parameter \
     --region "$REGION" \
@@ -55,6 +45,42 @@ get_parameter_optional() {
     --query "Parameter.Value" \
     --output text 2>/dev/null || true
 }
+
+COPILOTO_HABILITADO="$(get_parameter_optional copiloto-agente-habilitado)"
+COPILOTO_HABILITADO="${COPILOTO_HABILITADO:-false}"
+if [ "$COPILOTO_HABILITADO" != "true" ] && [ "$COPILOTO_HABILITADO" != "false" ]; then
+  echo "Despliegue cancelado: copiloto-agente-habilitado debe ser true o false."
+  exit 78
+fi
+
+IA_PROVEEDOR_VALUE="$(get_parameter ia-proveedor)" \
+  || { echo "Despliegue cancelado: no se pudo leer $PARAM_PREFIX/ia-proveedor."; exit 78; }
+if [ "$IA_PROVEEDOR_VALUE" != "BEDROCK" ]; then
+  echo "Despliegue cancelado: $PARAM_PREFIX/ia-proveedor es '$IA_PROVEEDOR_VALUE' y debe ser BEDROCK."
+  exit 78
+fi
+MODELO_NOTA="$(get_parameter ia-bedrock-modelo-nota)" \
+  || { echo "Despliegue cancelado: no se pudo leer $PARAM_PREFIX/ia-bedrock-modelo-nota."; exit 78; }
+if [ "$MODELO_NOTA" != "us.anthropic.claude-sonnet-4-6" ]; then
+  echo "Despliegue cancelado: $PARAM_PREFIX/ia-bedrock-modelo-nota no coincide con el perfil de nota permitido en IAM."
+  exit 78
+fi
+MODELO_TEMAS="$(get_parameter ia-bedrock-modelo-temas)" \
+  || { echo "Despliegue cancelado: no se pudo leer $PARAM_PREFIX/ia-bedrock-modelo-temas."; exit 78; }
+if [ "$MODELO_TEMAS" != "us.anthropic.claude-sonnet-4-5-20250929-v1:0" ]; then
+  echo "Despliegue cancelado: $PARAM_PREFIX/ia-bedrock-modelo-temas no coincide con el perfil de temas permitido en IAM."
+  exit 78
+fi
+
+# El workflow deja el bundle nuevo en entrante/ y recién acá, pasado el gate, reemplaza los archivos
+# de la app: un deploy cancelado no deja un Caddyfile o un compose sin desplegar que el próximo
+# arranque del gateway o un restaurar-respaldo.sh tomarían con el .env viejo.
+ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$ORIGEN" != "$APP_DIR" ]; then
+  mkdir -p "$APP_DIR"
+  cp "$ORIGEN"/docker-compose.prod.yml "$ORIGEN"/Caddyfile "$ORIGEN"/Caddyfile.modelos "$ORIGEN"/deploy-mvp.sh "$ORIGEN"/refresh-ip-certificate.sh "$APP_DIR"/
+  chmod 700 "$APP_DIR"/deploy-mvp.sh "$APP_DIR"/refresh-ip-certificate.sh
+fi
 
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
@@ -137,22 +163,10 @@ umask 077
   printf 'WHISPER_NUM_WORKERS=2\n'
   printf 'WHISPER_MAX_CONCURRENT_INFERENCES=2\n'
   printf 'WHISPER_VAD_MIN_SILENCE_MS=250\n'
-  # Nota clinica (Epica 5) y cifrado en reposo (ADR-007). Si el parametro no existe,
-  # se escribe vacio: el backend degrada con claridad (503 IA / sin cifrado) sin romper el deploy.
-  printf 'ANTHROPIC_API_KEY=%s\n' "$(get_parameter anthropic-api-key 2>/dev/null || true)"
-  # ANTHROPIC (API publica con clave) o BEDROCK (dentro de la cuenta, autenticacion IAM). Con
-  # BEDROCK los identificadores son perfiles de inferencia, no nombres de modelo.
-  IA_PROVEEDOR_VALUE="$(get_parameter_optional ia-proveedor)"
-  IA_PROVEEDOR_VALUE="${IA_PROVEEDOR_VALUE:-ANTHROPIC}"
+  printf 'COPILOTO_AGENTE_HABILITADO=%s\n' "$COPILOTO_HABILITADO"
   printf 'IA_PROVEEDOR=%s\n' "$IA_PROVEEDOR_VALUE"
-  if [ "$IA_PROVEEDOR_VALUE" = "BEDROCK" ]; then
-    MODELO_NOTA="$(get_parameter_optional ia-bedrock-modelo-nota)"
-    MODELO_TEMAS="$(get_parameter_optional ia-bedrock-modelo-temas)"
-    printf 'ANTHROPIC_MODEL=%s\n' "${MODELO_NOTA:-us.anthropic.claude-sonnet-5}"
-    printf 'ANTHROPIC_TOPICS_MODEL=%s\n' "${MODELO_TEMAS:-us.anthropic.claude-haiku-4-5-20251001-v1:0}"
-  else
-    printf 'ANTHROPIC_MODEL=claude-sonnet-5\n'
-  fi
+  printf 'ANTHROPIC_MODEL=%s\n' "$MODELO_NOTA"
+  printf 'ANTHROPIC_TOPICS_MODEL=%s\n' "$MODELO_TEMAS"
   printf 'ENCRYPTION_KEY=%s\n' "$(get_parameter encryption-key 2>/dev/null || true)"
   # Back Office: credenciales del primer ADMIN_PLATAFORMA. Se aplican una sola vez, cuando la
   # tabla administradores esta vacia (AdminSeedRunner). Si el parametro no existe en SSM, se
