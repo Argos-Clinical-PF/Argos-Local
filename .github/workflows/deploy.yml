@@ -67,8 +67,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Obtener bundle de Argos-Local
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           repository: Argos-Clinical-PF/Argos-Local
           ref: main
 
@@ -77,7 +78,7 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Configurar credenciales AWS mediante OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -332,6 +333,11 @@ jobs:
                   echo "::error::Deploy cancelado: hay sesiones, cargas o jobs post-sesión activos. Reintentar cuando terminen, o relanzar Release MVP con forzar=true."
                   exit 1
                 fi
+                if [ "$CODIGO" = "78" ]; then
+                  echo "configuracion_invalida=true" >> "$GITHUB_OUTPUT"
+                  echo "::error::Deploy cancelado sin tocar la app: la configuración de IA en SSM (/argos/mvp/ia-proveedor, ia-bedrock-modelo-nota, ia-bedrock-modelo-temas) no es válida. No se revierte. Ver el diagnóstico, corregir el parámetro y relanzar."
+                  exit 1
+                fi
                 echo "El comando SSM termino en estado $ESTADO tras $((intento * 10))s."
                 exit 1
                 ;;
@@ -414,6 +420,7 @@ jobs:
         if: >-
           failure() && (inputs.action || 'deploy') == 'deploy'
           && steps.command.outputs.command_id != '' && steps.command.outputs.bloqueado != 'true'
+          && steps.command.outputs.configuracion_invalida != 'true'
           && (steps.command.outcome == 'failure' || steps.smoke.outcome == 'failure')
         env:
           BUCKET: ${{ steps.aws.outputs.bucket }}

@@ -18,11 +18,14 @@ jobs:
       TRANSCRIPCION_TAG: sha-validation
       EMOCIONES_TAG: sha-validation
       RECORDINGS_BUCKET: argos-validation
+      IA_PROVEEDOR: BEDROCK
       PUBLIC_BASE_URL: https://argos.example
       PUBLIC_HOST: argos.example
       RTC_HOST: rtc.argos.example
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Validar Compose
         run: |
@@ -45,7 +48,7 @@ jobs:
             caddy.json >/dev/null
 
       - name: Validar scripts
-        uses: ludeeus/action-shellcheck@2.0.0
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
         with:
           scandir: ./scripts
 
@@ -57,7 +60,7 @@ jobs:
           grep -Fq 'id: bundle' .github/workflows/deploy.yml
           grep -Fq 'steps.bundle.outputs.sha' .github/workflows/deploy.yml
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: 1.14.8
 

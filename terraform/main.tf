@@ -1037,16 +1037,15 @@ resource "aws_iam_role_policy" "ec2_bedrock" {
     Version = "2012-10-17"
     Statement = [{
       Effect = "Allow"
-      Action = [
-        "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
-      ]
-      # Solo los modelos que usa la nota clínica, por perfil de inferencia y por modelo base: el
-      # perfil enruta entre regiones de EE.UU. y hace falta permitir las dos formas del ARN.
-      Resource = [
-        "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
-        "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*.anthropic.claude-*"
-      ]
+      Action = ["bedrock:InvokeModel"]
+      # Perfiles SSM vigentes y destinos verificados en la cuenta ARGOS; sin modelos futuros implícitos.
+      Resource = concat([
+        "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/us.anthropic.claude-sonnet-4-6",
+        "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        ], flatten([for region in ["us-east-1", "us-east-2", "us-west-2"] : [
+          "arn:aws:bedrock:${region}::foundation-model/anthropic.claude-sonnet-4-6",
+          "arn:aws:bedrock:${region}::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"
+      ]]))
     }]
   })
 }
