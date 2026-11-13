@@ -144,16 +144,23 @@ resource "aws_lambda_function" "boveda" {
   memory_size      = 256
 
   environment {
-    variables = {
+    variables = merge({
       OPERACION       = each.key
-      EMISOR          = "argos-emisor-sintetico"
       PROFESIONALES   = join(",", sort(tolist(var.profesionales)))
-      CLAVE_PUBLICA   = var.clave_publica
       CLAVE_CIFRADO   = aws_kms_key.cifrado.arn
       CLAVE_HUELLA    = aws_kms_key.huella.arn
       TABLA_BOVEDA    = aws_dynamodb_table.boveda.name
       TABLA_AUDITORIA = aws_dynamodb_table.auditoria.name
-    }
+      }, var.cognito == null ? {
+      EMISOR        = "argos-emisor-sintetico"
+      CLAVE_PUBLICA = var.clave_publica
+      } : {
+      COGNITO_EMISOR    = var.cognito.emisor
+      COGNITO_CLIENTE   = var.cognito.cliente
+      COGNITO_AUDIENCIA = var.cognito.audiencia
+      COGNITO_ALCANCE   = var.cognito.alcance
+      COGNITO_VINCULOS  = jsonencode(var.cognito.vinculos)
+    })
   }
 
   depends_on = [aws_iam_role_policy.boveda]

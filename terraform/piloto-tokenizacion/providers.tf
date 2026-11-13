@@ -52,3 +52,28 @@ variable "principal_de_pruebas" {
     error_message = "Usar un principal IAM concreto de la cuenta ARGOS."
   }
 }
+
+variable "cognito" {
+  description = "Configuracion del emisor Cognito y vinculos de los profesionales ficticios"
+  type = object({
+    emisor    = string
+    cliente   = string
+    audiencia = string
+    alcance   = string
+    vinculos  = map(string)
+  })
+  default = null
+
+  validation {
+    condition = var.cognito == null ? true : (
+      can(regex("^https://cognito-idp\\.us-east-1\\.amazonaws\\.com/us-east-1_[A-Za-z0-9]+$", var.cognito.emisor)) &&
+      can(regex("^[a-z0-9]{1,128}$", var.cognito.cliente)) &&
+      var.cognito.audiencia == "https://argosclinical.online/recursos/boveda-validacion" &&
+      var.cognito.alcance == "${var.cognito.audiencia}/alias" &&
+      length(var.cognito.vinculos) == 2 &&
+      toset(values(var.cognito.vinculos)) == var.profesionales &&
+      alltrue([for sujeto in keys(var.cognito.vinculos) : can(regex("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$", sujeto))])
+    )
+    error_message = "Usar el emisor de validacion y vincular dos sujetos distintos a los profesionales ficticios."
+  }
+}
