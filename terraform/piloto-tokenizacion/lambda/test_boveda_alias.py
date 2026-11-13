@@ -136,3 +136,44 @@ class BovedaAliasTest(unittest.TestCase):
                 self.assertEqual(self.resolver(prueba=token()), {"codigo": "ACCESO_DENEGADO"})
             proveedor.return_value.get_signing_key_from_jwt.side_effect = jwt.PyJWKClientConnectionError("sin red")
             self.assertEqual(self.resolver(prueba=token()), {"codigo": "BOVEDA_NO_DISPONIBLE"})
+
+    def test_revocacion_lee_el_vinculo_vigente_antes_de_cada_resolucion(self):
+        self.ddb.create_table(
+            TableName="vinculos", BillingMode="PAY_PER_REQUEST",
+            AttributeDefinitions=[{"AttributeName": "sujeto", "AttributeType": "S"}],
+            KeySchema=[{"AttributeName": "sujeto", "KeyType": "HASH"}],
+        )
+        emisor = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_Validacion"
+        audiencia = "https://argosclinical.online/recursos/boveda-validacion"
+        sujeto = str(uuid4())
+        ahora = int(datetime.now(timezone.utc).timestamp())
+        jwt_realista = jwt.encode({"sub": sujeto, "iss": emisor, "iat": ahora, "exp": ahora + 300,
+                                    "client_id": "cliente-validacion", "token_use": "access", "scope": audiencia + "/alias"},
+                                   self.privada, algorithm="RS256")
+        item = {"sujeto": {"S": sujeto}, "profesional": {"S": self.profesional}, "activo": {"BOOL": True}}
+        self.ddb.put_item(TableName="vinculos", Item=item)
+        self.ddb.create_table(
+            TableName="permisos", BillingMode="PAY_PER_REQUEST",
+            AttributeDefinitions=[{"AttributeName": "huella", "AttributeType": "S"}],
+            KeySchema=[{"AttributeName": "huella", "KeyType": "HASH"}],
+        )
+        with patch.dict(os.environ, {"COGNITO_EMISOR": emisor, "COGNITO_AUDIENCIA": audiencia,
+                                    "COGNITO_CLIENTE": "cliente-validacion", "COGNITO_ALCANCE": audiencia + "/alias",
+                                    "TABLA_VINCULOS": "vinculos", "TABLA_PERMISOS_NOTA": "permisos",
+                                    "COGNITO_VINCULOS": json.dumps({sujeto: self.profesional})}), \
+                patch("identidad_cognito.claves") as proveedor:
+            proveedor.return_value.get_signing_key_from_jwt.return_value.key = self.privada.public_key()
+            self.assertEqual(self.guardar(prueba=jwt_realista)["codigo"], "OK")
+            self.assertEqual(self.resolver(prueba=jwt_realista)["codigo"], "OK")
+            sesion = str(uuid4())
+            permiso = self.resolver(prueba=jwt_realista, sesion=sesion, proposito="AUTORIZAR_NOTA")["permiso"]
+            self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="NOTA_AUTOMATICA", permiso=permiso)
+                             ["alias"][self.ref["token"]], self.alias)
+            self.assertEqual(self.resolver(prueba=None, sesion=str(uuid4()), proposito="NOTA_AUTOMATICA", permiso=permiso),
+                             {"codigo": "ACCESO_DENEGADO"})
+            self.assertNotIn(permiso, json.dumps(self.ddb.scan(TableName="permisos")["Items"]))
+            self.ddb.put_item(TableName="vinculos", Item={**item, "activo": {"BOOL": False}})
+            self.assertEqual(self.resolver(prueba=jwt_realista), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.guardar(prueba=jwt_realista), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="NOTA_AUTOMATICA", permiso=permiso),
+                             {"codigo": "ACCESO_DENEGADO"})

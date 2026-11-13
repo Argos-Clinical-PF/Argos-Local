@@ -2,6 +2,7 @@ import json
 import os
 import re
 from functools import lru_cache
+from uuid import UUID
 
 import jwt
 
@@ -13,7 +14,7 @@ def claves(emisor):
     return jwt.PyJWKClient(emisor + "/.well-known/jwks.json", lifespan=300, timeout=2)
 
 
-def identificar(prueba):
+def identificar(prueba, ddb):
     emisor = os.environ["COGNITO_EMISOR"]
     llave = claves(emisor).get_signing_key_from_jwt(prueba)
     datos = jwt.decode(
@@ -31,4 +32,19 @@ def identificar(prueba):
         or not 0 < datos["exp"] - datos["iat"] <= 300
     ):
         raise jwt.InvalidTokenError("Credencial fuera del alcance de la bóveda")
-    return json.loads(os.environ["COGNITO_VINCULOS"]).get(datos["sub"])
+    sujeto = str(UUID(datos["sub"]))
+    return sujeto, profesional_activo(ddb, sujeto)
+
+
+def profesional_activo(ddb, sujeto):
+    tabla = os.getenv("TABLA_VINCULOS")
+    if not tabla:
+        return json.loads(os.environ["COGNITO_VINCULOS"]).get(sujeto)
+    vinculo = ddb.get_item(
+        TableName=tabla,
+        Key={"sujeto": {"S": sujeto}},
+        ConsistentRead=True,
+    ).get("Item", {})
+    if vinculo.get("activo", {}).get("BOOL") is not True:
+        return None
+    return vinculo.get("profesional", {}).get("S")

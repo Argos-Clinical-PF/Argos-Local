@@ -2,13 +2,14 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import boto3
 import jwt
 from botocore.exceptions import ClientError
-from identidad_cognito import identificar
+from identidad_cognito import identificar, profesional_activo
 
 MAX_LOTE = 20
 PROPOSITOS = {"FICHA", "LISTADO", "REDACCION"}
@@ -28,19 +29,22 @@ def uuid_canonico(valor):
         raise Rechazo("SOLICITUD_INVALIDA") from None
 
 
-def autorizar(evento):
+def autorizar(evento, ddb):
     prueba = evento.get("prueba")
     if not isinstance(prueba, str) or len(prueba) > 4096:
         raise Rechazo("ACCESO_DENEGADO")
     try:
         solicitado = uuid_canonico(evento.get("profesional"))
         if os.getenv("COGNITO_EMISOR"):
-            sujeto = uuid_canonico(identificar(prueba))
+            sujeto_oidc, vinculo = identificar(prueba, ddb)
+            sujeto = uuid_canonico(vinculo)
         else:
+            sujeto_oidc = None
             sujeto = autorizar_emisor_sintetico(prueba)
-        if sujeto != solicitado or sujeto not in os.environ["PROFESIONALES"].split(","):
+        profesionales = os.getenv("PROFESIONALES")
+        if sujeto != solicitado or (profesionales is not None and sujeto not in profesionales.split(",")):
             raise Rechazo("ACCESO_DENEGADO")
-        return sujeto
+        return sujeto, sujeto_oidc
     except jwt.PyJWKClientConnectionError:
         raise Rechazo("BOVEDA_NO_DISPONIBLE") from None
     except (jwt.PyJWTError, Rechazo, AttributeError, TypeError, ValueError):
@@ -48,6 +52,8 @@ def autorizar(evento):
 
 
 def autorizar_emisor_sintetico(prueba):
+    if not os.getenv("PROFESIONALES") or os.getenv("TABLA_VINCULOS"):
+        raise Rechazo("ACCESO_DENEGADO")
     datos = jwt.decode(
         prueba,
         os.environ["CLAVE_PUBLICA"],
@@ -80,7 +86,7 @@ def llave(profesional, ref):
 def contexto(profesional, ref):
     vinculo = json.dumps([profesional, *ref], separators=(",", ":")).encode()
     return {
-        "entorno": "piloto-tokenizacion",
+        "entorno": os.getenv("ENTORNO_BOVEDA", "piloto-tokenizacion"),
         "dato": "alias-paciente",
         "vinculo": hashlib.sha256(vinculo).hexdigest(),
     }
@@ -97,7 +103,7 @@ def auditar(ddb, profesional, operacion, resultado, cantidad):
             "resultado": {"S": resultado},
             "cantidad": {"N": str(cantidad)},
             "fecha": {"S": ahora.isoformat()},
-            "expira": {"N": str(int(ahora.timestamp()) + 14 * 86400)},
+            "expira": {"N": str(int(ahora.timestamp()) + int(os.getenv("AUDITORIA_DIAS", "14")) * 86400)},
         },
     )
 
@@ -162,6 +168,46 @@ def resolver(ddb, kms, profesional, evento):
     }}
 
 
+def vinculo_nota(evento, profesional):
+    registros = evento.get("registros")
+    if not isinstance(registros, list) or len(registros) != 1:
+        raise Rechazo("ACCESO_DENEGADO")
+    return [profesional, uuid_canonico(evento.get("sesion")), *referencia(registros[0])]
+
+
+def emitir_nota(ddb, profesional, sujeto, evento):
+    if not sujeto or not os.getenv("TABLA_PERMISOS_NOTA"):
+        raise Rechazo("ACCESO_DENEGADO")
+    valores = vinculo_nota(evento, profesional)
+    ref = tuple(valores[2:])
+    if not ddb.get_item(TableName=os.environ["TABLA_BOVEDA"], Key=llave(profesional, ref),
+                        ProjectionExpression="referencia", ConsistentRead=True).get("Item"):
+        raise Rechazo("ACCESO_DENEGADO")
+    permiso = secrets.token_urlsafe(32)
+    ddb.put_item(TableName=os.environ["TABLA_PERMISOS_NOTA"], Item={
+        "huella": {"S": hashlib.sha256(permiso.encode()).hexdigest()},
+        "vinculo": {"S": json.dumps(valores)}, "sujeto": {"S": sujeto},
+        "expira": {"N": str(int(datetime.now(timezone.utc).timestamp()) + 86400)},
+    }, ConditionExpression="attribute_not_exists(huella)")
+    return {"permiso": permiso}
+
+
+def autorizar_nota(ddb, evento):
+    permiso = evento.get("permiso")
+    if not isinstance(permiso, str) or len(permiso) != 43 or not os.getenv("TABLA_PERMISOS_NOTA"):
+        raise Rechazo("ACCESO_DENEGADO")
+    profesional = uuid_canonico(evento.get("profesional"))
+    registro = ddb.get_item(TableName=os.environ["TABLA_PERMISOS_NOTA"],
+                            Key={"huella": {"S": hashlib.sha256(permiso.encode()).hexdigest()}},
+                            ConsistentRead=True).get("Item")
+    if not registro or int(registro["expira"]["N"]) <= datetime.now(timezone.utc).timestamp():
+        raise Rechazo("ACCESO_DENEGADO")
+    if (json.loads(registro["vinculo"]["S"]) != vinculo_nota(evento, profesional)
+            or profesional_activo(ddb, registro["sujeto"]["S"]) != profesional):
+        raise Rechazo("ACCESO_DENEGADO")
+    return profesional
+
+
 def handler(evento, _contexto):
     modo = os.environ["OPERACION"]
     ddb = boto3.client("dynamodb")
@@ -171,11 +217,22 @@ def handler(evento, _contexto):
     try:
         if not isinstance(evento, dict):
             raise Rechazo("SOLICITUD_INVALIDA")
-        profesional = autorizar(evento)
-        if modo == "guardar":
+        if modo == "resolver" and evento.get("proposito") == "NOTA_AUTOMATICA":
+            profesional = autorizar_nota(ddb, evento)
+            operacion = "NOTA_AUTOMATICA"
+            datos = resolver(ddb, kms, profesional, {**evento, "proposito": "REDACCION"})
+            cantidad = 1
+        elif modo == "resolver" and evento.get("proposito") == "AUTORIZAR_NOTA":
+            profesional, sujeto = autorizar(evento, ddb)
+            operacion = "AUTORIZAR_NOTA"
+            datos = emitir_nota(ddb, profesional, sujeto, evento)
+            cantidad = 1
+        elif modo == "guardar":
+            profesional, _ = autorizar(evento, ddb)
             datos = guardar(ddb, kms, profesional, evento)
             cantidad = 1
         else:
+            profesional, _ = autorizar(evento, ddb)
             datos = resolver(ddb, kms, profesional, evento)
             cantidad = len(datos["alias"])
             operacion = evento["proposito"]
