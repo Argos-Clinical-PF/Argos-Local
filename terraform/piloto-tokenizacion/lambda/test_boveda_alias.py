@@ -104,3 +104,35 @@ class BovedaAliasTest(unittest.TestCase):
         error = ClientError({"Error": {"Code": "AccessDeniedException"}}, "PutItem")
         with patch("boveda_alias.auditar", side_effect=error):
             self.assertEqual(self.resolver(), {"codigo": "BOVEDA_NO_DISPONIBLE"})
+
+    def test_cognito_requiere_acceso_del_cliente_y_sujeto_vinculado(self):
+        emisor = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_Validacion"
+        audiencia = "https://argosclinical.online/recursos/boveda-validacion"
+        alcance = audiencia + "/alias"
+        sujeto = str(uuid4())
+        ahora = int(datetime.now(timezone.utc).timestamp())
+        datos = {"sub": sujeto, "iss": emisor, "aud": audiencia, "iat": ahora, "exp": ahora + 300,
+                 "client_id": "cliente-validacion", "token_use": "access", "scope": alcance}
+
+        def token(**ajustes):
+            return jwt.encode({**datos, **ajustes}, self.privada, algorithm="RS256", headers={"kid": "llave-1"})
+
+        with patch.dict(os.environ, {"COGNITO_EMISOR": emisor, "COGNITO_AUDIENCIA": audiencia,
+                                    "COGNITO_CLIENTE": "cliente-validacion", "COGNITO_ALCANCE": alcance,
+                                    "COGNITO_VINCULOS": json.dumps({sujeto: self.profesional})}), \
+                patch("identidad_cognito.claves") as proveedor:
+            proveedor.return_value.get_signing_key_from_jwt.return_value.key = self.privada.public_key()
+            self.assertEqual(self.guardar(prueba=token())["codigo"], "OK")
+            self.assertEqual(self.resolver(prueba=token())["alias"][self.ref["token"]], self.alias)
+            sin_audiencia = jwt.encode({k: v for k, v in datos.items() if k != "aud"}, self.privada, algorithm="RS256")
+            self.assertEqual(self.resolver(prueba=sin_audiencia)["codigo"], "OK")
+            for ajustes in ({"sub": self.ajeno}, {"aud": "otra"}, {"client_id": "otro"}, {"scope": "openid"},
+                            {"token_use": "id"}, {"exp": ahora - 1}, {"iss": "otro"}):
+                with self.subTest(ajustes=ajustes):
+                    self.assertEqual(self.resolver(prueba=token(**ajustes)), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.resolver(prueba=token(), profesional=self.ajeno), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.resolver(prueba=self.prueba(self.profesional)), {"codigo": "ACCESO_DENEGADO"})
+            with patch.dict(os.environ, {"COGNITO_VINCULOS": "{}"}):
+                self.assertEqual(self.resolver(prueba=token()), {"codigo": "ACCESO_DENEGADO"})
+            proveedor.return_value.get_signing_key_from_jwt.side_effect = jwt.PyJWKClientConnectionError("sin red")
+            self.assertEqual(self.resolver(prueba=token()), {"codigo": "BOVEDA_NO_DISPONIBLE"})

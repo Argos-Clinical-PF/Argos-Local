@@ -32,7 +32,7 @@ Construir la Lambda en un directorio `.build/lambda` nuevo. AWS aporta el SDK de
 
 ```sh
 mkdir -p .build/lambda
-cp lambda/boveda_alias.py .build/lambda/
+cp lambda/boveda_alias.py lambda/identidad_cognito.py .build/lambda/
 python3.12 -m pip install --target .build/lambda --platform manylinux2014_x86_64 \
   --implementation cp --python-version 3.13 --only-binary=:all: -r lambda/requirements.txt
 terraform init

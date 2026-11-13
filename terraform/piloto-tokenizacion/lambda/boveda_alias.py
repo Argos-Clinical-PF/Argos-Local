@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import boto3
 import jwt
 from botocore.exceptions import ClientError
+from identidad_cognito import identificar
 
 MAX_LOTE = 20
 PROPOSITOS = {"FICHA", "LISTADO", "REDACCION"}
@@ -32,28 +33,37 @@ def autorizar(evento):
     if not isinstance(prueba, str) or len(prueba) > 4096:
         raise Rechazo("ACCESO_DENEGADO")
     try:
-        datos = jwt.decode(
-            prueba,
-            os.environ["CLAVE_PUBLICA"],
-            algorithms=["RS256"],
-            issuer=os.environ["EMISOR"],
-            audience="argos-boveda-alias",
-            options={"require": ["sub", "iat", "nbf", "exp", "iss", "aud"]},
-        )
-        if (
-            datos.get("tipo") != "acceso"
-            or datos["exp"] - datos["iat"] > 900
-            or datos["iat"] > datos["nbf"]
-            or datos["nbf"] >= datos["exp"]
-        ):
-            raise Rechazo("ACCESO_DENEGADO")
-        sujeto = uuid_canonico(datos["sub"])
         solicitado = uuid_canonico(evento.get("profesional"))
+        if os.getenv("COGNITO_EMISOR"):
+            sujeto = uuid_canonico(identificar(prueba))
+        else:
+            sujeto = autorizar_emisor_sintetico(prueba)
         if sujeto != solicitado or sujeto not in os.environ["PROFESIONALES"].split(","):
             raise Rechazo("ACCESO_DENEGADO")
         return sujeto
-    except (jwt.InvalidTokenError, Rechazo, TypeError, ValueError):
+    except jwt.PyJWKClientConnectionError:
+        raise Rechazo("BOVEDA_NO_DISPONIBLE") from None
+    except (jwt.PyJWTError, Rechazo, AttributeError, TypeError, ValueError):
         raise Rechazo("ACCESO_DENEGADO") from None
+
+
+def autorizar_emisor_sintetico(prueba):
+    datos = jwt.decode(
+        prueba,
+        os.environ["CLAVE_PUBLICA"],
+        algorithms=["RS256"],
+        issuer=os.environ["EMISOR"],
+        audience="argos-boveda-alias",
+        options={"require": ["sub", "iat", "nbf", "exp", "iss", "aud"]},
+    )
+    if (
+        datos.get("tipo") != "acceso"
+        or datos["exp"] - datos["iat"] > 900
+        or datos["iat"] > datos["nbf"]
+        or datos["nbf"] >= datos["exp"]
+    ):
+        raise Rechazo("ACCESO_DENEGADO")
+    return uuid_canonico(datos["sub"])
 
 
 def referencia(dato):
