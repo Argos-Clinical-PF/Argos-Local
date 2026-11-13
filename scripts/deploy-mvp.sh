@@ -102,6 +102,16 @@ ESPERA_ASIGNACION_HORAS="${ESPERA_ASIGNACION_HORAS:-24}"
 RASTREO_HABILITADO="$(get_parameter_optional emociones-rastreo-habilitado)"
 RASTREO_HABILITADO="${RASTREO_HABILITADO:-false}"
 RASTREO_PILOTO="$(get_parameter_optional emociones-rastreo-piloto)"
+TOKENIZACION_COGNITO="$(get_parameter_optional tokenizacion-cliente-cognito)"
+TOKENIZACION_PROFESIONALES="$(get_parameter_optional tokenizacion-profesionales)"
+TOKENIZACION_PERFIL=""
+if [[ -n "$TOKENIZACION_COGNITO" || -n "$TOKENIZACION_PROFESIONALES" ]]; then
+  if [[ ! "$TOKENIZACION_COGNITO" =~ ^[a-z0-9]{1,128}$ || ! "$TOKENIZACION_PROFESIONALES" =~ ^[0-9a-f-]{36}(,[0-9a-f-]{36})*$ ]]; then
+    echo "Configuración incompleta o inválida de tokenización."
+    exit 1
+  fi
+  TOKENIZACION_PERFIL="tokenizacion-produccion"
+fi
 
 umask 077
 {
@@ -200,6 +210,9 @@ umask 077
   #   aws ssm put-parameter --name /argos/mvp/emociones-rastreo-habilitado --value true --type String --overwrite
   printf 'ARGOS_EMOCIONES_RASTREO_HABILITADO=%s\n' "$RASTREO_HABILITADO"
   printf 'ARGOS_EMOCIONES_RASTREO_PILOTO=%s\n' "$RASTREO_PILOTO"
+  printf 'ARGOS_TOKENIZACION_PERFIL=%s\n' "$TOKENIZACION_PERFIL"
+  printf 'ARGOS_TOKENIZACION_CLIENTE_COGNITO=%s\n' "$TOKENIZACION_COGNITO"
+  printf 'ARGOS_TOKENIZACION_PROFESIONALES=%s\n' "$TOKENIZACION_PROFESIONALES"
   # Mercado Pago producción (ARGOS-256): credenciales de SSM y variables de pasarela
   printf 'MERCADOPAGO_ACCESS_TOKEN=%s\n' "$(get_parameter_optional mercadopago-access-token)"
   printf 'MERCADOPAGO_WEBHOOK_SECRET=%s\n' "$(get_parameter_optional mercadopago-webhook-secret)"
