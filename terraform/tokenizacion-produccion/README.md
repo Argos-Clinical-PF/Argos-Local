@@ -20,6 +20,8 @@ Crear la identidad en Cognito mediante alta administrada y completar la verifica
 
 La aplicación activa el perfil `tokenizacion-produccion` cuando existen los parámetros `/argos/mvp/tokenizacion-cliente-cognito` y `/argos/mvp/tokenizacion-profesionales`. Se debe desplegar primero en la cohorte ficticia y verificar la autenticación, alta, consulta, exportación, revocación y las solicitudes al proveedor con datos sintéticos. La credencial de Cognito dura cinco minutos y se guarda en una cookie segura. Con consentimiento vigente, ARGOS obtiene al iniciar la sesión un permiso de hasta 24 horas para el expediente, la sesión y la referencia del alias. Se conserva cifrado en PostgreSQL mientras lo necesita el procesamiento. La bóveda vuelve a verificar el vínculo del profesional cuando se usa.
 
+Nota Clínica y revisión automática de patrones tienen permisos distintos. Ambos quedan ligados al profesional, la sesión y la referencia vigente del alias. La revisión automática comprueba de nuevo el consentimiento antes de invocar IA. Los permisos de nota existentes se siguen aceptando para su propósito original. Publicar la revisión de las Lambdas antes del backend que solicita el permiso de patrones. Validar los dos propósitos con datos ficticios y comprobar que el permiso de uno sea rechazado en el otro.
+
 ## Migración y recuperación
 
 La ruta `POST /api/patients/{id}/identidad/proteger` migra una ficha del profesional autenticado y permite reintentar con la misma referencia cuando falla la publicación en PostgreSQL. Ensayar el alta y el acceso con datos sintéticos. Registrar un punto de recuperación común para PostgreSQL y DynamoDB y conservar las claves KMS vigentes. Validar referencias y revocaciones en las copias aisladas antes de mover tráfico.

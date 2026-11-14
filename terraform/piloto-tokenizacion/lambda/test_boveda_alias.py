@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import unittest
@@ -171,9 +172,28 @@ class BovedaAliasTest(unittest.TestCase):
                              ["alias"][self.ref["token"]], self.alias)
             self.assertEqual(self.resolver(prueba=None, sesion=str(uuid4()), proposito="NOTA_AUTOMATICA", permiso=permiso),
                              {"codigo": "ACCESO_DENEGADO"})
+            patrones = self.resolver(prueba=jwt_realista, sesion=sesion, proposito="AUTORIZAR_PATRONES")["permiso"]
+            self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="PATRONES_AUTOMATICOS", permiso=patrones)
+                             ["alias"][self.ref["token"]], self.alias)
+            for proposito, otro_permiso in [("NOTA_AUTOMATICA", patrones), ("PATRONES_AUTOMATICOS", permiso)]:
+                self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito=proposito, permiso=otro_permiso),
+                                 {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.resolver(prueba=None, sesion=str(uuid4()), proposito="PATRONES_AUTOMATICOS", permiso=patrones),
+                             {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="PATRONES_AUTOMATICOS", permiso=patrones,
+                                          profesional=self.ajeno), {"codigo": "ACCESO_DENEGADO"})
             self.assertNotIn(permiso, json.dumps(self.ddb.scan(TableName="permisos")["Items"]))
+            self.assertNotIn(patrones, json.dumps(self.ddb.scan(TableName="permisos")["Items"]))
+            clave_nota = {"huella": {"S": hashlib.sha256(permiso.encode()).hexdigest()}}
+            self.ddb.update_item(TableName="permisos", Key=clave_nota, UpdateExpression="REMOVE proposito")
+            self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="NOTA_AUTOMATICA", permiso=permiso)
+                             ["alias"][self.ref["token"]], self.alias)
+            self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="PATRONES_AUTOMATICOS", permiso=permiso),
+                             {"codigo": "ACCESO_DENEGADO"})
             self.ddb.put_item(TableName="vinculos", Item={**item, "activo": {"BOOL": False}})
             self.assertEqual(self.resolver(prueba=jwt_realista), {"codigo": "ACCESO_DENEGADO"})
             self.assertEqual(self.guardar(prueba=jwt_realista), {"codigo": "ACCESO_DENEGADO"})
             self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="NOTA_AUTOMATICA", permiso=permiso),
+                             {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="PATRONES_AUTOMATICOS", permiso=patrones),
                              {"codigo": "ACCESO_DENEGADO"})
