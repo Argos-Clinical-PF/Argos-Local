@@ -107,6 +107,7 @@ origin-base-url
 postgres-password
 jwt-secret
 encryption-key
+portal-email-index-key
 mail-username
 mail-password
 admin-seed-email
@@ -118,6 +119,10 @@ mercadopago-webhook-secret
 livekit-api-key
 livekit-api-secret
 ```
+
+El índice de acceso al portal usa una clave propia de 32 bytes en Base64 en un `SecureString`.
+Durante la etapa aditiva, la ausencia del parámetro conserva la ruta anterior. Un error de SSM
+o un valor inválido cancela el despliegue antes de reemplazar el bundle.
 
 Y estas banderas y modelos, con su valor en producción al 2026-10-31:
 

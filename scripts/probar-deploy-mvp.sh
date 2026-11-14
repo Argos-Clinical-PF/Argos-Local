@@ -239,7 +239,8 @@ printf 'valor-malformado' > "$TMP/ssm/portal-email-index-key"
 correr_deploy PARAMETROS="$TMP/ssm"
 afirmar "una clave inválida cancela sin copiar el bundle" \
   cancela_sin_tocar 'la clave del índice de correo del portal tiene un formato inválido\.'
-afirmar "el error omite el valor leído de SSM" bash -c '! grep -Fq valor-malformado "$1"' prueba "$TMP/salida"
+sin_valor_del_secreto() { ! grep -Fq valor-malformado "$TMP/salida"; }
+afirmar "el error omite el valor leído de SSM" sin_valor_del_secreto
 
 CLAVE_PORTAL_FICTICIA=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 printf '%s' "$CLAVE_PORTAL_FICTICIA" > "$TMP/ssm/portal-email-index-key"
