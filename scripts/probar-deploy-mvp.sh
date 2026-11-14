@@ -227,6 +227,25 @@ parametros ia-proveedor BEDROCK ia-bedrock-modelo-nota "$NOTA" ia-bedrock-modelo
 correr_deploy PARAMETROS="$TMP/ssm"
 afirmar "una bandera inválida cancela sin reemplazar el bundle" cancela_sin_tocar 'copiloto-agente-habilitado debe ser true o false\.'
 
+echo "== Clave del índice de correo del portal"
+parametros ia-proveedor BEDROCK ia-bedrock-modelo-nota "$NOTA" ia-bedrock-modelo-temas "$TEMAS"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "sin el parámetro SSM mantiene la etapa aditiva desactivada" env_contiene 'PORTAL_EMAIL_INDEX_KEY='
+correr_deploy PARAMETROS="$TMP/ssm" SSM_FALLA=portal-email-index-key
+afirmar "si falla SSM no reemplaza la configuración de correo" \
+  cancela_sin_tocar 'no se pudo leer la clave del índice de correo del portal\.'
+
+printf 'valor-malformado' > "$TMP/ssm/portal-email-index-key"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "una clave inválida cancela sin copiar el bundle" \
+  cancela_sin_tocar 'la clave del índice de correo del portal tiene un formato inválido\.'
+afirmar "el error omite el valor leído de SSM" bash -c '! grep -Fq valor-malformado "$1"' prueba "$TMP/salida"
+
+CLAVE_PORTAL_FICTICIA=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+printf '%s' "$CLAVE_PORTAL_FICTICIA" > "$TMP/ssm/portal-email-index-key"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "la clave válida pasa al entorno privado" env_contiene "PORTAL_EMAIL_INDEX_KEY=$CLAVE_PORTAL_FICTICIA"
+
 echo "== Vigía de contenedores unhealthy"
 # El vigía se instala desde un heredoc de deploy-mvp.sh; se extrae tal cual y solo se cambia el
 # directorio de conteos (/run no existe fuera de la instancia).

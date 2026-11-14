@@ -72,6 +72,17 @@ if [ "$MODELO_TEMAS" != "us.anthropic.claude-sonnet-4-5-20250929-v1:0" ]; then
   exit 78
 fi
 
+if ! PORTAL_EMAIL_INDEX_KEY="$(get_parameter portal-email-index-key 2>&1)"; then
+  if [[ "$PORTAL_EMAIL_INDEX_KEY" != *ParameterNotFound* ]]; then
+    echo "Despliegue cancelado: no se pudo leer la clave del índice de correo del portal."
+    exit 78
+  fi
+  PORTAL_EMAIL_INDEX_KEY=""
+elif [[ ! "$PORTAL_EMAIL_INDEX_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+  echo "Despliegue cancelado: la clave del índice de correo del portal tiene un formato inválido."
+  exit 78
+fi
+
 # El workflow deja el bundle nuevo en entrante/ y recién acá, pasado el gate, reemplaza los archivos
 # de la app: un deploy cancelado no deja un Caddyfile o un compose sin desplegar que el próximo
 # arranque del gateway o un restaurar-respaldo.sh tomarían con el .env viejo.
@@ -177,6 +188,7 @@ umask 077
   printf 'IA_PROVEEDOR=%s\n' "$IA_PROVEEDOR_VALUE"
   printf 'ANTHROPIC_MODEL=%s\n' "$MODELO_NOTA"
   printf 'ANTHROPIC_TOPICS_MODEL=%s\n' "$MODELO_TEMAS"
+  printf 'PORTAL_EMAIL_INDEX_KEY=%s\n' "$PORTAL_EMAIL_INDEX_KEY"
   printf 'ENCRYPTION_KEY=%s\n' "$(get_parameter encryption-key 2>/dev/null || true)"
   # Back Office: credenciales del primer ADMIN_PLATAFORMA. Se aplican una sola vez, cuando la
   # tabla administradores esta vacia (AdminSeedRunner). Si el parametro no existe en SSM, se
