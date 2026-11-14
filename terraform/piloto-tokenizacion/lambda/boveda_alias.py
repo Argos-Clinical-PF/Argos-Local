@@ -13,6 +13,10 @@ from identidad_cognito import identificar, profesional_activo
 
 MAX_LOTE = 20
 PROPOSITOS = {"FICHA", "LISTADO", "REDACCION"}
+PERMISOS_ASINCRONOS = {
+    "AUTORIZAR_NOTA": "NOTA_AUTOMATICA",
+    "AUTORIZAR_PATRONES": "PATRONES_AUTOMATICOS",
+}
 
 
 class Rechazo(Exception):
@@ -168,17 +172,17 @@ def resolver(ddb, kms, profesional, evento):
     }}
 
 
-def vinculo_nota(evento, profesional):
+def vinculo_permiso(evento, profesional):
     registros = evento.get("registros")
     if not isinstance(registros, list) or len(registros) != 1:
         raise Rechazo("ACCESO_DENEGADO")
     return [profesional, uuid_canonico(evento.get("sesion")), *referencia(registros[0])]
 
 
-def emitir_nota(ddb, profesional, sujeto, evento):
+def emitir_permiso(ddb, profesional, sujeto, evento, proposito):
     if not sujeto or not os.getenv("TABLA_PERMISOS_NOTA"):
         raise Rechazo("ACCESO_DENEGADO")
-    valores = vinculo_nota(evento, profesional)
+    valores = vinculo_permiso(evento, profesional)
     ref = tuple(valores[2:])
     if not ddb.get_item(TableName=os.environ["TABLA_BOVEDA"], Key=llave(profesional, ref),
                         ProjectionExpression="referencia", ConsistentRead=True).get("Item"):
@@ -187,12 +191,13 @@ def emitir_nota(ddb, profesional, sujeto, evento):
     ddb.put_item(TableName=os.environ["TABLA_PERMISOS_NOTA"], Item={
         "huella": {"S": hashlib.sha256(permiso.encode()).hexdigest()},
         "vinculo": {"S": json.dumps(valores)}, "sujeto": {"S": sujeto},
+        "proposito": {"S": proposito},
         "expira": {"N": str(int(datetime.now(timezone.utc).timestamp()) + 86400)},
     }, ConditionExpression="attribute_not_exists(huella)")
     return {"permiso": permiso}
 
 
-def autorizar_nota(ddb, evento):
+def autorizar_permiso(ddb, evento):
     permiso = evento.get("permiso")
     if not isinstance(permiso, str) or len(permiso) != 43 or not os.getenv("TABLA_PERMISOS_NOTA"):
         raise Rechazo("ACCESO_DENEGADO")
@@ -202,7 +207,8 @@ def autorizar_nota(ddb, evento):
                             ConsistentRead=True).get("Item")
     if not registro or int(registro["expira"]["N"]) <= datetime.now(timezone.utc).timestamp():
         raise Rechazo("ACCESO_DENEGADO")
-    if (json.loads(registro["vinculo"]["S"]) != vinculo_nota(evento, profesional)
+    if (registro.get("proposito", {"S": "NOTA_AUTOMATICA"})["S"] != evento["proposito"]
+            or json.loads(registro["vinculo"]["S"]) != vinculo_permiso(evento, profesional)
             or profesional_activo(ddb, registro["sujeto"]["S"]) != profesional):
         raise Rechazo("ACCESO_DENEGADO")
     return profesional
@@ -217,15 +223,16 @@ def handler(evento, _contexto):
     try:
         if not isinstance(evento, dict):
             raise Rechazo("SOLICITUD_INVALIDA")
-        if modo == "resolver" and evento.get("proposito") == "NOTA_AUTOMATICA":
-            profesional = autorizar_nota(ddb, evento)
-            operacion = "NOTA_AUTOMATICA"
+        proposito = evento.get("proposito")
+        if modo == "resolver" and proposito in PERMISOS_ASINCRONOS.values():
+            profesional = autorizar_permiso(ddb, evento)
+            operacion = proposito
             datos = resolver(ddb, kms, profesional, {**evento, "proposito": "REDACCION"})
             cantidad = 1
-        elif modo == "resolver" and evento.get("proposito") == "AUTORIZAR_NOTA":
+        elif modo == "resolver" and isinstance(proposito, str) and proposito in PERMISOS_ASINCRONOS:
             profesional, sujeto = autorizar(evento, ddb)
-            operacion = "AUTORIZAR_NOTA"
-            datos = emitir_nota(ddb, profesional, sujeto, evento)
+            operacion = proposito
+            datos = emitir_permiso(ddb, profesional, sujeto, evento, PERMISOS_ASINCRONOS[proposito])
             cantidad = 1
         elif modo == "guardar":
             profesional, _ = autorizar(evento, ddb)
