@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 from identidad_cognito import identificar, profesional_activo
 
 MAX_LOTE = 20
+MAX_BORRADO = 100
 PROPOSITOS = {"FICHA", "LISTADO", "REDACCION"}
 PERMISOS_ASINCRONOS = {
     "AUTORIZAR_NOTA": "NOTA_AUTOMATICA",
@@ -94,6 +95,64 @@ def llave_baja(profesional, paciente):
 def comprobar_baja(ddb, tabla, clave):
     if ddb.get_item(TableName=tabla, Key=clave, ConsistentRead=True).get("Item"):
         raise Rechazo("ACCESO_DENEGADO")
+
+
+def verificar_borrado(ddb, tabla, tabla_bajas, profesional, ref):
+    baja = ddb.get_item(
+        TableName=tabla_bajas, Key=llave_baja(profesional, ref[0]), ConsistentRead=True
+    ).get("Item")
+    if baja:
+        if baja.get("version_borrado", {}).get("S") != ref[1]:
+            raise Rechazo("ACCESO_DENEGADO")
+        return True
+    clave = llave(profesional, ref)
+    vigente = ddb.query(
+        TableName=tabla, ConsistentRead=True, Select="SPECIFIC_ATTRIBUTES", ProjectionExpression="referencia",
+        KeyConditionExpression="ambito = :ambito AND referencia = :referencia",
+        ExpressionAttributeValues={":ambito": clave["ambito"], ":referencia": clave["referencia"]},
+    )
+    if not vigente["Items"]:
+        raise Rechazo("ACCESO_DENEGADO")
+    return False
+
+
+def borrar(ddb, profesional, evento):
+    if set(evento) != {"profesional", "paciente", "token", "prueba", "preparar"} or type(evento["preparar"]) is not bool:
+        raise Rechazo("SOLICITUD_INVALIDA")
+    tabla = os.environ["TABLA_BOVEDA"]
+    tabla_bajas = os.environ["TABLA_BAJAS"]
+    ref = referencia(evento)
+    marcada = verificar_borrado(ddb, tabla, tabla_bajas, profesional, ref)
+    if evento["preparar"]:
+        return {}
+    if not marcada:
+        try:
+            ddb.transact_write_items(TransactItems=[
+                {"ConditionCheck": {"TableName": tabla, "Key": llave(profesional, ref),
+                                    "ConditionExpression": "attribute_exists(referencia)"}},
+                {"Put": {"TableName": tabla_bajas,
+                         "Item": {**llave_baja(profesional, ref[0]), "version_borrado": {"S": ref[1]},
+                                  "fecha": {"S": datetime.now(timezone.utc).isoformat()}},
+                         "ConditionExpression": "attribute_not_exists(paciente)"}},
+            ])
+        except ddb.exceptions.TransactionCanceledException:
+            if not verificar_borrado(ddb, tabla, tabla_bajas, profesional, ref):
+                raise
+
+    lote = ddb.query(
+        TableName=tabla, ConsistentRead=True, Select="SPECIFIC_ATTRIBUTES", ProjectionExpression="ambito, referencia",
+        KeyConditionExpression="ambito = :ambito AND begins_with(referencia, :prefijo)",
+        ExpressionAttributeValues={":ambito": {"S": profesional}, ":prefijo": {"S": f"{ref[0]}#"}},
+        Limit=MAX_BORRADO + 1,
+    )
+    if lote["Items"]:
+        ddb.transact_write_items(TransactItems=[
+            {"Delete": {"TableName": tabla, "Key": clave}} for clave in lote["Items"][:MAX_BORRADO]
+        ])
+    if len(lote["Items"]) > MAX_BORRADO or lote.get("LastEvaluatedKey"):
+        # El marcador impide nuevas escrituras. El próximo intento continúa con el lote restante.
+        raise Rechazo("BOVEDA_BORRADO_EN_CURSO")
+    return {}
 
 
 def guardar_si_activo(ddb, tabla, item, tabla_bajas, clave_baja):
@@ -258,7 +317,6 @@ def autorizar_permiso(ddb, evento):
 def handler(evento, _contexto):
     modo = os.environ["OPERACION"]
     ddb = boto3.client("dynamodb")
-    kms = boto3.client("kms")
     profesional = None
     operacion = modo
     try:
@@ -268,7 +326,7 @@ def handler(evento, _contexto):
         if modo == "resolver" and proposito in PERMISOS_ASINCRONOS.values():
             profesional = autorizar_permiso(ddb, evento)
             operacion = proposito
-            datos = resolver(ddb, kms, profesional, {**evento, "proposito": "REDACCION"})
+            datos = resolver(ddb, boto3.client("kms"), profesional, {**evento, "proposito": "REDACCION"})
             cantidad = 1
         elif modo == "resolver" and isinstance(proposito, str) and proposito in PERMISOS_ASINCRONOS:
             profesional, sujeto = autorizar(evento, ddb)
@@ -277,13 +335,20 @@ def handler(evento, _contexto):
             cantidad = 1
         elif modo == "guardar":
             profesional, _ = autorizar(evento, ddb)
-            datos = guardar(ddb, kms, profesional, evento)
+            datos = guardar(ddb, boto3.client("kms"), profesional, evento)
             cantidad = 1
-        else:
+        elif modo == "borrar":
             profesional, _ = autorizar(evento, ddb)
-            datos = resolver(ddb, kms, profesional, evento)
+            operacion = "PREPARAR_BORRADO" if evento.get("preparar") is True else "BORRAR"
+            datos = borrar(ddb, profesional, evento)
+            cantidad = 1
+        elif modo == "resolver":
+            profesional, _ = autorizar(evento, ddb)
+            datos = resolver(ddb, boto3.client("kms"), profesional, evento)
             cantidad = len(datos["alias"])
             operacion = evento["proposito"]
+        else:
+            raise Rechazo("BOVEDA_NO_DISPONIBLE")
         auditar(ddb, profesional, operacion, "AUTORIZADO", cantidad)
         return {"codigo": "OK", **datos}
     except Rechazo as error:
