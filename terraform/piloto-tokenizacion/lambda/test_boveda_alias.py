@@ -117,6 +117,42 @@ class BovedaAliasTest(unittest.TestCase):
             self.assertEqual(self.resolver(), {"codigo": "BOVEDA_NO_DISPONIBLE"})
             self.assertEqual(self.guardar(token=str(uuid4()))["codigo"], "BOVEDA_NO_DISPONIBLE")
 
+    def test_borrado_del_propietario_elimina_versiones_y_bloquea_una_copia_historica(self):
+        with patch.dict(os.environ, {"TABLA_BAJAS": "bajas"}):
+            self.assertEqual(self.guardar()["codigo"], "OK")
+            historica = {**self.ref, "token": str(uuid4())}
+            self.assertEqual(self.guardar(**historica)["codigo"], "OK")
+            otro = {**self.ref, "paciente": str(uuid4())}
+            self.assertEqual(self.guardar(**otro)["codigo"], "OK")
+            self.assertEqual(self.guardar(profesional=self.ajeno, prueba=self.prueba(self.ajeno))["codigo"], "OK")
+            copia = self.ddb.get_item(
+                TableName="boveda", Key=llave(self.profesional, (self.ref["paciente"], historica["token"]))
+            )["Item"]
+
+            self.assertEqual(self.invocar("borrar", preparar=True, **self.ref), {"codigo": "OK"})
+            self.assertEqual(self.resolver()["codigo"], "OK")
+            self.assertEqual(self.invocar("borrar", preparar=False, **self.ref, prueba=self.prueba(self.ajeno)),
+                             {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.invocar("borrar", preparar=False, **self.ref), {"codigo": "OK"})
+            self.assertEqual(self.ddb.scan(TableName="boveda")["Count"], 2)
+            self.assertEqual(self.invocar("borrar", preparar=False, **self.ref), {"codigo": "OK"})
+            self.assertEqual(self.invocar("borrar", preparar=False, **historica), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.guardar(token=str(uuid4()))["codigo"], "ACCESO_DENEGADO")
+            self.ddb.put_item(TableName="boveda", Item=copia)
+            self.assertEqual(self.resolver(registros=[historica]), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.invocar("borrar", preparar=False, **self.ref), {"codigo": "OK"})
+            self.assertEqual(self.ddb.scan(TableName="boveda")["Count"], 2)
+
+    def test_borrado_reanuda_el_lote_despues_de_un_corte(self):
+        with patch.dict(os.environ, {"TABLA_BAJAS": "bajas"}), patch("boveda_alias.MAX_BORRADO", 1):
+            self.assertEqual(self.guardar()["codigo"], "OK")
+            self.assertEqual(self.guardar(token=str(uuid4()))["codigo"], "OK")
+            self.assertEqual(self.invocar("borrar", preparar=False, **self.ref),
+                             {"codigo": "BOVEDA_BORRADO_EN_CURSO"})
+            self.assertEqual(self.resolver(), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.invocar("borrar", preparar=False, **self.ref), {"codigo": "OK"})
+            self.assertEqual(self.ddb.scan(TableName="boveda")["Count"], 0)
+
     def test_contexto_criptografico_y_auditoria(self):
         self.assertEqual(self.guardar()["codigo"], "OK")
         origen = llave(self.profesional, (self.ref["paciente"], self.ref["token"]))
