@@ -1,6 +1,6 @@
 locals {
   prefijo = "argos-boveda-produccion"
-  modos   = toset(["guardar", "resolver"])
+  modos   = toset(["guardar", "resolver", "borrar"])
   claves = {
     cifrado = { spec = "SYMMETRIC_DEFAULT", uso = "ENCRYPT_DECRYPT", rotar = true }
     huella  = { spec = "HMAC_256", uso = "GENERATE_VERIFY_MAC", rotar = false }
@@ -102,7 +102,7 @@ resource "aws_kms_key" "boveda" {
         Action    = modo == "guardar" ? "kms:Encrypt" : "kms:Decrypt"
         Resource  = "*"
         Condition = { StringEquals = local.contexto_kms }
-        } if each.key == "cifrado"], [for clave in [each.key] : {
+        } if each.key == "cifrado" && modo != "borrar"], [for clave in [each.key] : {
         Effect    = "Allow"
         Principal = { AWS = aws_iam_role.boveda["guardar"].arn }
         Action    = "kms:GenerateMac"
@@ -132,18 +132,8 @@ resource "aws_iam_role_policy" "boveda" {
     Statement = concat([
       {
         Effect   = "Allow"
-        Action   = each.key == "guardar" ? ["dynamodb:PutItem", "dynamodb:GetItem"] : ["dynamodb:BatchGetItem", "dynamodb:GetItem"]
-        Resource = aws_dynamodb_table.boveda["boveda"].arn
-      },
-      {
-        Effect   = "Allow"
         Action   = "dynamodb:GetItem"
         Resource = aws_dynamodb_table.boveda["vinculos"].arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = each.key == "guardar" ? ["dynamodb:GetItem", "dynamodb:ConditionCheckItem"] : ["dynamodb:BatchGetItem", "dynamodb:GetItem"]
-        Resource = aws_dynamodb_table.boveda["bajas"].arn
       },
       {
         Effect   = "Allow"
@@ -155,7 +145,52 @@ resource "aws_iam_role_policy" "boveda" {
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "${aws_cloudwatch_log_group.boveda[each.key].arn}:*"
       }
-      ], [for modo in [each.key] : {
+      ], [for permiso in [
+        {
+          Effect   = "Allow"
+          Action   = "dynamodb:Query"
+          Resource = aws_dynamodb_table.boveda["boveda"].arn
+          Condition = {
+            "ForAllValues:StringEquals" = { "dynamodb:Attributes" = ["ambito", "referencia"] }
+            Null                        = { "dynamodb:Attributes" = "false" }
+            StringEquals                = { "dynamodb:Select" = "SPECIFIC_ATTRIBUTES" }
+          }
+        },
+        {
+          Effect   = "Allow"
+          Action   = ["dynamodb:ConditionCheckItem", "dynamodb:DeleteItem"]
+          Resource = aws_dynamodb_table.boveda["boveda"].arn
+          Condition = {
+            StringEquals           = { "dynamodb:EnclosingOperation" = "TransactWriteItems" }
+            "StringEqualsIfExists" = { "dynamodb:ReturnValues" = "NONE" }
+          }
+        },
+        {
+          Effect   = "Allow"
+          Action   = "dynamodb:PutItem"
+          Resource = aws_dynamodb_table.boveda["bajas"].arn
+          Condition = {
+            StringEquals           = { "dynamodb:EnclosingOperation" = "TransactWriteItems" }
+            "StringEqualsIfExists" = { "dynamodb:ReturnValues" = "NONE" }
+          }
+        },
+        {
+          Effect   = "Allow"
+          Action   = "dynamodb:GetItem"
+          Resource = aws_dynamodb_table.boveda["bajas"].arn
+        }
+        ] : permiso if each.key == "borrar"], [for permiso in [
+        {
+          Effect   = "Allow"
+          Action   = each.key == "guardar" ? ["dynamodb:PutItem", "dynamodb:GetItem"] : ["dynamodb:BatchGetItem", "dynamodb:GetItem"]
+          Resource = aws_dynamodb_table.boveda["boveda"].arn
+        },
+        {
+          Effect   = "Allow"
+          Action   = each.key == "guardar" ? ["dynamodb:GetItem", "dynamodb:ConditionCheckItem"] : ["dynamodb:BatchGetItem", "dynamodb:GetItem"]
+          Resource = aws_dynamodb_table.boveda["bajas"].arn
+        },
+        ] : permiso if each.key != "borrar"], [for modo in [each.key] : {
         Effect   = "Allow"
         Action   = ["dynamodb:GetItem", "dynamodb:PutItem"]
         Resource = aws_dynamodb_table.boveda["permisos"].arn
@@ -221,6 +256,7 @@ output "configuracion" {
   value = {
     guardar      = aws_lambda_alias.produccion["guardar"].arn
     resolver     = aws_lambda_alias.produccion["resolver"].arn
+    borrar       = aws_lambda_alias.produccion["borrar"].arn
     cliente      = aws_cognito_user_pool_client.profesionales.id
     autorizacion = "https://${local.dominio}.auth.us-east-1.amazoncognito.com/oauth2/authorize"
     token        = "https://${local.dominio}.auth.us-east-1.amazoncognito.com/oauth2/token"

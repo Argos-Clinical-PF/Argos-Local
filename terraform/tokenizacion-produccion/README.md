@@ -1,6 +1,6 @@
 # Bóveda de alias de ARGOS en producción
 
-El estado de este módulo vive en el bucket de Terraform de ARGOS bajo `argos/tokenizacion/produccion.tfstate`. La cuenta es `616322963974` y la región es `us-east-1`. La aplicación tiene permiso para invocar los dos alias `produccion`. La administración de Cognito, los vínculos y las claves usa un principal independiente del despliegue de la aplicación.
+El estado de este módulo vive en el bucket de Terraform de ARGOS bajo `argos/tokenizacion/produccion.tfstate`. La cuenta es `616322963974` y la región es `us-east-1`. La aplicación invoca los alias `produccion` de guardar, resolver y borrar. La administración de Cognito, los vínculos y las claves usa un principal independiente del despliegue de la aplicación.
 
 ```sh
 mkdir -p .build/lambda
@@ -30,10 +30,16 @@ Si se restaura la tabla de vínculos, aplicar a la copia todas las bajas posteri
 
 La tabla `argos-boveda-produccion-bajas` registra las bajas por profesional y paciente. Las Lambdas bloquean lecturas, escrituras y permisos de ese paciente aunque reaparezca una versión del alias desde un respaldo. Al restaurar la tabla de alias, conservar la tabla de bajas vigente. Si hay que recuperar la tabla de bajas, incorporar también todas las bajas posteriores al punto restaurado antes de habilitar los alias. Mantener en servicio una versión de las Lambdas que consulte ese registro. Comprobar el bloqueo después de la restauración con datos ficticios.
 
+## Borrado de un expediente
+
+El endpoint habitual de eliminación comprueba la titularidad y la ausencia de historia clínica antes de preparar la baja con la identidad verificada. La Lambda de borrado comprueba la referencia vigente y registra la baja antes de purgar las versiones cifradas del alias. Su rol consulta las claves de las versiones y ejecuta los borrados sin acceso a KMS. La API confirma el resultado después de registrar la eliminación y borrar el expediente activo en PostgreSQL.
+
+Si hay un corte después de registrar la baja, repetir la eliminación con la cuenta titular y una verificación vigente. La Lambda conserva el registro y retoma la purga; la transacción de PostgreSQL se reintenta. Si se restaura una copia anterior, conciliar también los expedientes de PostgreSQL con las bajas vigentes antes de abrir tráfico. Verificar la ausencia de las versiones en la tabla activa y registrar la fecha de vencimiento de las copias históricas según su retención.
+
 Ante un fallo de activación, detener las altas de la cohorte. Mantener un backend compatible con referencias tokenizadas y recuperar los almacenes como unidad. Las imágenes anteriores que leen solo `pacientes.alias` requieren un respaldo previo a la migración y perderían las escrituras posteriores si se restaurara ese respaldo.
 
 ## Auditoría de invocaciones
 
-El trail `argos-boveda-produccion-invocaciones` selecciona los eventos de datos de las dos funciones de la bóveda, incluidos sus alias y versiones. Los entrega a un bucket privado con una clave KMS dedicada, validación de integridad y retención de 90 días. Los roles de aplicación y despliegue carecen de permisos sobre ese registro.
+El trail `argos-boveda-produccion-invocaciones` selecciona los eventos de datos de las funciones de la bóveda, incluidos sus alias y versiones. Los entrega a un bucket privado con una clave KMS dedicada, validación de integridad y retención de 90 días. Los roles de aplicación y despliegue carecen de permisos sobre ese registro.
 
-Después de aplicar, verificar la configuración con `cloudtrail get-event-selectors` y la entrega con `cloudtrail get-trail-status`. Invocar los dos alias con solicitudes sintéticas, registrar los IDs de solicitud y comprobar que aparezcan en los objetos cifrados de S3. Inspeccionar los objetos con el principal de auditoría y comprobar que omitan las credenciales y el cuerpo enviado. Confirmar una invocación fuera de la bóveda ausente del registro para el mismo intervalo. Para revertir la activación, detener el registro del trail y conservar los objetos y la clave durante la retención.
+Después de aplicar, verificar la configuración con `cloudtrail get-event-selectors` y la entrega con `cloudtrail get-trail-status`. Invocar los alias con solicitudes sintéticas, registrar los IDs de solicitud y comprobar que aparezcan en los objetos cifrados de S3. Inspeccionar los objetos con el principal de auditoría y comprobar que omitan las credenciales y el cuerpo enviado. Confirmar una invocación fuera de la bóveda ausente del registro para el mismo intervalo. Para revertir la activación, detener el registro del trail y conservar los objetos y la clave durante la retención.
