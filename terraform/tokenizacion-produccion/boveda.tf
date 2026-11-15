@@ -10,6 +10,7 @@ locals {
     auditoria = { hash = "evento", rango = null }
     vinculos  = { hash = "sujeto", rango = null }
     permisos  = { hash = "huella", rango = null }
+    bajas     = { hash = "ambito", rango = "paciente" }
   }
   contexto_kms = {
     "kms:EncryptionContext:entorno" = local.prefijo
@@ -141,6 +142,11 @@ resource "aws_iam_role_policy" "boveda" {
       },
       {
         Effect   = "Allow"
+        Action   = each.key == "guardar" ? ["dynamodb:GetItem", "dynamodb:ConditionCheckItem"] : ["dynamodb:BatchGetItem", "dynamodb:GetItem"]
+        Resource = aws_dynamodb_table.boveda["bajas"].arn
+      },
+      {
+        Effect   = "Allow"
         Action   = "dynamodb:PutItem"
         Resource = aws_dynamodb_table.boveda["auditoria"].arn
       },
@@ -183,6 +189,7 @@ resource "aws_lambda_function" "boveda" {
       CLAVE_CIFRADO       = aws_kms_key.boveda["cifrado"].arn
       CLAVE_HUELLA        = aws_kms_key.boveda["huella"].arn
       TABLA_BOVEDA        = aws_dynamodb_table.boveda["boveda"].name
+      TABLA_BAJAS         = aws_dynamodb_table.boveda["bajas"].name
       TABLA_AUDITORIA     = aws_dynamodb_table.boveda["auditoria"].name
     }
   }
