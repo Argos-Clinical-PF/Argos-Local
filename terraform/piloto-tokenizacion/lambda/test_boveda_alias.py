@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from moto import mock_aws
 
-from boveda_alias import handler, llave
+from boveda_alias import handler, llave, llave_baja
 
 
 class BovedaAliasTest(unittest.TestCase):
@@ -30,7 +30,8 @@ class BovedaAliasTest(unittest.TestCase):
         entorno.start()
         self.addCleanup(entorno.stop)
         self.ddb = boto3.client("dynamodb")
-        for tabla, campos in (("boveda", ["ambito", "referencia"]), ("auditoria", ["evento"])):
+        for tabla, campos in (("boveda", ["ambito", "referencia"]), ("auditoria", ["evento"]),
+                              ("bajas", ["ambito", "paciente"])):
             self.ddb.create_table(
                 TableName=tabla,
                 BillingMode="PAY_PER_REQUEST",
@@ -93,6 +94,28 @@ class BovedaAliasTest(unittest.TestCase):
         self.assertEqual(self.resolver(registros=[self.ref, ajeno]), {"codigo": "ACCESO_DENEGADO"})
         self.assertEqual(self.resolver(registros=[self.ref] * 21), {"codigo": "SOLICITUD_INVALIDA"})
         self.assertEqual(self.resolver(proposito=[]), {"codigo": "SOLICITUD_INVALIDA"})
+
+    def test_baja_impide_resolver_alias_incluso_si_reaparece_en_una_restauracion(self):
+        with patch.dict(os.environ, {"TABLA_BAJAS": "bajas"}):
+            self.assertEqual(self.guardar()["codigo"], "OK")
+            self.assertEqual(self.guardar()["codigo"], "OK")
+            self.assertEqual(self.guardar(alias="Distinto")["codigo"], "OPERACION_EN_CONFLICTO")
+            vigente = {"paciente": str(uuid4()), "token": str(uuid4())}
+            self.assertEqual(self.guardar(**vigente)["codigo"], "OK")
+            self.ddb.put_item(TableName="bajas", Item=llave_baja(self.profesional, self.ref["paciente"]))
+            self.assertEqual(self.resolver(), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.resolver(registros=[vigente, self.ref]), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.resolver(registros=[vigente])["codigo"], "OK")
+            self.assertEqual(self.guardar()["codigo"], "ACCESO_DENEGADO")
+            self.assertEqual(self.guardar(token=str(uuid4()))["codigo"], "ACCESO_DENEGADO")
+            self.assertEqual(self.guardar(profesional=self.ajeno, prueba=self.prueba(self.ajeno))["codigo"], "OK")
+            self.assertEqual(self.ddb.scan(TableName="boveda")["Count"], 3)
+
+    def test_lectura_falla_cerrada_si_el_registro_de_bajas_no_responde(self):
+        self.assertEqual(self.guardar()["codigo"], "OK")
+        with patch.dict(os.environ, {"TABLA_BAJAS": "registro-ausente"}):
+            self.assertEqual(self.resolver(), {"codigo": "BOVEDA_NO_DISPONIBLE"})
+            self.assertEqual(self.guardar(token=str(uuid4()))["codigo"], "BOVEDA_NO_DISPONIBLE")
 
     def test_contexto_criptografico_y_auditoria(self):
         self.assertEqual(self.guardar()["codigo"], "OK")
@@ -190,6 +213,15 @@ class BovedaAliasTest(unittest.TestCase):
                              ["alias"][self.ref["token"]], self.alias)
             self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="PATRONES_AUTOMATICOS", permiso=permiso),
                              {"codigo": "ACCESO_DENEGADO"})
+            with patch.dict(os.environ, {"TABLA_BAJAS": "bajas"}):
+                self.ddb.put_item(TableName="bajas", Item=llave_baja(self.profesional, self.ref["paciente"]))
+                self.assertEqual(self.resolver(prueba=jwt_realista, sesion=sesion, proposito="AUTORIZAR_PATRONES"),
+                                 {"codigo": "ACCESO_DENEGADO"})
+                self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="NOTA_AUTOMATICA", permiso=permiso),
+                                 {"codigo": "ACCESO_DENEGADO"})
+                self.assertEqual(self.resolver(prueba=None, sesion=sesion, proposito="PATRONES_AUTOMATICOS", permiso=patrones),
+                                 {"codigo": "ACCESO_DENEGADO"})
+                self.ddb.delete_item(TableName="bajas", Key=llave_baja(self.profesional, self.ref["paciente"]))
             self.ddb.put_item(TableName="vinculos", Item={**item, "activo": {"BOOL": False}})
             self.assertEqual(self.resolver(prueba=jwt_realista), {"codigo": "ACCESO_DENEGADO"})
             self.assertEqual(self.guardar(prueba=jwt_realista), {"codigo": "ACCESO_DENEGADO"})

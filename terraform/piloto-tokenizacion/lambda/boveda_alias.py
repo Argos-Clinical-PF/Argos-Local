@@ -87,6 +87,41 @@ def llave(profesional, ref):
     return {"ambito": {"S": profesional}, "referencia": {"S": f"{paciente}#{token}"}}
 
 
+def llave_baja(profesional, paciente):
+    return {"ambito": {"S": profesional}, "paciente": {"S": paciente}}
+
+
+def comprobar_baja(ddb, tabla, clave):
+    if ddb.get_item(TableName=tabla, Key=clave, ConsistentRead=True).get("Item"):
+        raise Rechazo("ACCESO_DENEGADO")
+
+
+def guardar_si_activo(ddb, tabla, item, tabla_bajas, clave_baja):
+    guardar_item = {"TableName": tabla, "Item": item,
+                    "ConditionExpression": "attribute_not_exists(referencia)"}
+    try:
+        if tabla_bajas:
+            ddb.transact_write_items(TransactItems=[
+                {"ConditionCheck": {"TableName": tabla_bajas, "Key": clave_baja,
+                                    "ConditionExpression": "attribute_not_exists(paciente)"}},
+                {"Put": guardar_item},
+            ])
+        else:
+            ddb.put_item(**guardar_item)
+        return True
+    except ddb.exceptions.ConditionalCheckFailedException:
+        return False
+    except ddb.exceptions.TransactionCanceledException as error:
+        motivos = error.response.get("CancellationReasons", [])
+        if len(motivos) != 2:
+            raise
+        if motivos[0].get("Code") == "ConditionalCheckFailed":
+            raise Rechazo("ACCESO_DENEGADO") from None
+        if motivos[1].get("Code") == "ConditionalCheckFailed":
+            comprobar_baja(ddb, tabla_bajas, clave_baja)
+            return False
+        raise
+
 def contexto(profesional, ref):
     vinculo = json.dumps([profesional, *ref], separators=(",", ":")).encode()
     return {
@@ -117,6 +152,8 @@ def guardar(ddb, kms, profesional, evento):
     alias = evento.get("alias")
     if not isinstance(alias, str) or not 1 <= len(alias) <= 100 or alias.strip() != alias:
         raise Rechazo("SOLICITUD_INVALIDA")
+    tabla_bajas = os.getenv("TABLA_BAJAS")
+    clave_baja = llave_baja(profesional, ref[0])
     entrada = json.dumps(
         ["alias-paciente-v1", profesional, alias], ensure_ascii=False, separators=(",", ":")
     ).encode()
@@ -128,13 +165,8 @@ def guardar(ddb, kms, profesional, evento):
         KeyId=os.environ["CLAVE_CIFRADO"], Plaintext=alias.encode(),
         EncryptionContext=contexto(profesional, ref),
     )["CiphertextBlob"]
-    try:
-        ddb.put_item(
-            TableName=os.environ["TABLA_BOVEDA"],
-            Item={**clave, "cifrado": {"B": cifrado}, "huella": {"S": huella}},
-            ConditionExpression="attribute_not_exists(referencia)",
-        )
-    except ddb.exceptions.ConditionalCheckFailedException:
+    item = {**clave, "cifrado": {"B": cifrado}, "huella": {"S": huella}}
+    if not guardar_si_activo(ddb, os.environ["TABLA_BOVEDA"], item, tabla_bajas, clave_baja):
         previo = ddb.get_item(
             TableName=os.environ["TABLA_BOVEDA"], Key=clave, ConsistentRead=True
         ).get("Item")
@@ -154,11 +186,17 @@ def resolver(ddb, kms, profesional, evento):
     if len(refs) != len(set(refs)):
         raise Rechazo("SOLICITUD_INVALIDA")
     tabla = os.environ["TABLA_BOVEDA"]
-    respuesta = ddb.batch_get_item(
-        RequestItems={tabla: {"Keys": [llave(profesional, ref) for ref in refs], "ConsistentRead": True}}
-    )
+    tabla_bajas = os.getenv("TABLA_BAJAS")
+    solicitud = {tabla: {"Keys": [llave(profesional, ref) for ref in refs], "ConsistentRead": True}}
+    if tabla_bajas:
+        pacientes = dict.fromkeys(ref[0] for ref in refs)
+        solicitud[tabla_bajas] = {"Keys": [llave_baja(profesional, id_paciente) for id_paciente in pacientes],
+                                  "ConsistentRead": True}
+    respuesta = ddb.batch_get_item(RequestItems=solicitud)
     if respuesta.get("UnprocessedKeys"):
         raise Rechazo("BOVEDA_NO_DISPONIBLE")
+    if tabla_bajas and respuesta["Responses"].get(tabla_bajas):
+        raise Rechazo("ACCESO_DENEGADO")
     encontrados = {item["referencia"]["S"]: item for item in respuesta["Responses"].get(tabla, [])}
     if len(encontrados) != len(refs):
         raise Rechazo("ACCESO_DENEGADO")
@@ -184,6 +222,9 @@ def emitir_permiso(ddb, profesional, sujeto, evento, proposito):
         raise Rechazo("ACCESO_DENEGADO")
     valores = vinculo_permiso(evento, profesional)
     ref = tuple(valores[2:])
+    tabla_bajas = os.getenv("TABLA_BAJAS")
+    if tabla_bajas:
+        comprobar_baja(ddb, tabla_bajas, llave_baja(profesional, ref[0]))
     if not ddb.get_item(TableName=os.environ["TABLA_BOVEDA"], Key=llave(profesional, ref),
                         ProjectionExpression="referencia", ConsistentRead=True).get("Item"):
         raise Rechazo("ACCESO_DENEGADO")

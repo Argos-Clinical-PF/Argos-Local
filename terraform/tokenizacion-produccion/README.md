@@ -28,6 +28,8 @@ La ruta `POST /api/patients/{id}/identidad/proteger` migra una ficha del profesi
 
 Si se restaura la tabla de vínculos, aplicar a la copia todas las bajas posteriores al punto restaurado antes de habilitarla. Usar los vínculos vigentes como fuente de bajas. Si se pierde esa fuente, mantener los vínculos restaurados deshabilitados y volver a verificar cada alta. Probar el rechazo con un vínculo que estaba activo en el respaldo y fue revocado después.
 
+La tabla `argos-boveda-produccion-bajas` registra las bajas por profesional y paciente. Las Lambdas bloquean lecturas, escrituras y permisos de ese paciente aunque reaparezca una versión del alias desde un respaldo. Al restaurar la tabla de alias, conservar la tabla de bajas vigente. Si hay que recuperar la tabla de bajas, incorporar también todas las bajas posteriores al punto restaurado antes de habilitar los alias. Mantener en servicio una versión de las Lambdas que consulte ese registro. Comprobar el bloqueo después de la restauración con datos ficticios.
+
 Ante un fallo de activación, detener las altas de la cohorte. Mantener un backend compatible con referencias tokenizadas y recuperar los almacenes como unidad. Las imágenes anteriores que leen solo `pacientes.alias` requieren un respaldo previo a la migración y perderían las escrituras posteriores si se restaurara ese respaldo.
 
 ## Auditoría de invocaciones
