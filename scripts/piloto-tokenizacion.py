@@ -38,7 +38,7 @@ class TransporteLocal(BaseHTTPRequestHandler):
     def do_POST(self):
         rutas = {
             f"/2015-03-31/functions/argos-piloto-boveda-{modo}:piloto/invocations": modo
-            for modo in ("guardar", "resolver")
+            for modo in ("guardar", "resolver", "borrar")
         }
         modo = rutas.get(unquote(self.path))
         if modo is None:
@@ -99,13 +99,14 @@ def ejecutar(puerto, salida):
         kms = boto3.client("kms")
         crear_tabla(ddb, "boveda", ["ambito", "referencia"])
         crear_tabla(ddb, "auditoria", ["evento"])
+        crear_tabla(ddb, "bajas", ["ambito", "paciente"])
         datos = emitir_acceso(salida, f"http://127.0.0.1:{servidor.server_port}")
         os.environ.update({
             "CLAVE_PUBLICA": datos["clavePublica"], "EMISOR": EMISOR,
             "PROFESIONALES": ",".join(datos["profesionales"]),
             "CLAVE_CIFRADO": kms.create_key()["KeyMetadata"]["KeyId"],
             "CLAVE_HUELLA": kms.create_key(KeySpec="HMAC_256", KeyUsage="GENERATE_VERIFY_MAC")["KeyMetadata"]["KeyId"],
-            "TABLA_BOVEDA": "boveda", "TABLA_AUDITORIA": "auditoria",
+            "TABLA_BOVEDA": "boveda", "TABLA_AUDITORIA": "auditoria", "TABLA_BAJAS": "bajas",
         })
 
         try:
