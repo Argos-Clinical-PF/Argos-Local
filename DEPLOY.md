@@ -124,6 +124,11 @@ El índice de acceso al portal usa una clave propia de 32 bytes en Base64 en un 
 Durante la etapa aditiva, la ausencia del parámetro conserva la ruta anterior. Un error de SSM
 o un valor inválido cancela el despliegue antes de reemplazar el bundle.
 
+El parámetro `/argos/mvp/portal-email-solo-indice` admite `true` o `false` (valor inicial).
+Activarlo después de validar la cobertura del índice y desplegar un backend con V138. Los nuevos
+registros se crean con el correo cifrado y el índice. Para volver al modo aditivo, conservar la
+clave y una imagen con V138 o posterior.
+
 Y estas banderas y modelos, con su valor en producción al 2026-10-31:
 
 | Parámetro | Valor |

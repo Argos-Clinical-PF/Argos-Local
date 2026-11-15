@@ -83,6 +83,22 @@ elif [[ ! "$PORTAL_EMAIL_INDEX_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
   exit 78
 fi
 
+if ! PORTAL_EMAIL_SOLO_INDICE="$(get_parameter portal-email-solo-indice 2>&1)"; then
+  if [[ "$PORTAL_EMAIL_SOLO_INDICE" != *ParameterNotFound* ]]; then
+    echo "Despliegue cancelado: no se pudo leer el modo del correo del portal."
+    exit 78
+  fi
+  PORTAL_EMAIL_SOLO_INDICE=false
+fi
+if [[ "$PORTAL_EMAIL_SOLO_INDICE" != true && "$PORTAL_EMAIL_SOLO_INDICE" != false ]]; then
+  echo "Despliegue cancelado: el modo del correo del portal debe ser true o false."
+  exit 78
+fi
+if [[ "$PORTAL_EMAIL_SOLO_INDICE" == true && -z "$PORTAL_EMAIL_INDEX_KEY" ]]; then
+  echo "Despliegue cancelado: el modo solo índice exige la clave de correo del portal."
+  exit 78
+fi
+
 # El workflow deja el bundle nuevo en entrante/ y recién acá, pasado el gate, reemplaza los archivos
 # de la app: un deploy cancelado no deja un Caddyfile o un compose sin desplegar que el próximo
 # arranque del gateway o un restaurar-respaldo.sh tomarían con el .env viejo.
@@ -189,6 +205,7 @@ umask 077
   printf 'ANTHROPIC_MODEL=%s\n' "$MODELO_NOTA"
   printf 'ANTHROPIC_TOPICS_MODEL=%s\n' "$MODELO_TEMAS"
   printf 'PORTAL_EMAIL_INDEX_KEY=%s\n' "$PORTAL_EMAIL_INDEX_KEY"
+  printf 'PORTAL_EMAIL_SOLO_INDICE=%s\n' "$PORTAL_EMAIL_SOLO_INDICE"
   printf 'ENCRYPTION_KEY=%s\n' "$(get_parameter encryption-key 2>/dev/null || true)"
   # Back Office: credenciales del primer ADMIN_PLATAFORMA. Se aplican una sola vez, cuando la
   # tabla administradores esta vacia (AdminSeedRunner). Si el parametro no existe en SSM, se
