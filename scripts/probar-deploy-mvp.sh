@@ -247,6 +247,18 @@ printf '%s' "$CLAVE_PORTAL_FICTICIA" > "$TMP/ssm/portal-email-index-key"
 correr_deploy PARAMETROS="$TMP/ssm"
 afirmar "la clave válida pasa al entorno privado" env_contiene "PORTAL_EMAIL_INDEX_KEY=$CLAVE_PORTAL_FICTICIA"
 
+afirmar "sin bandera conserva el modo aditivo" env_contiene 'PORTAL_EMAIL_SOLO_INDICE=false'
+printf 'true' > "$TMP/ssm/portal-email-solo-indice"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "con la clave y la bandera usa solo el índice" env_contiene 'PORTAL_EMAIL_SOLO_INDICE=true'
+correr_deploy PARAMETROS="$TMP/ssm" SSM_FALLA=portal-email-solo-indice
+afirmar "si no puede leer la bandera cancela el despliegue" \
+  cancela_sin_tocar 'no se pudo leer el modo del correo del portal\.'
+parametros ia-proveedor BEDROCK ia-bedrock-modelo-nota "$NOTA" ia-bedrock-modelo-temas "$TEMAS" portal-email-solo-indice true
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "con solo índice y sin clave cancela el despliegue" \
+  cancela_sin_tocar 'el modo solo índice exige la clave de correo del portal\.'
+
 echo "== Vigía de contenedores unhealthy"
 # El vigía se instala desde un heredoc de deploy-mvp.sh; se extrae tal cual y solo se cambia el
 # directorio de conteos (/run no existe fuera de la instancia).
