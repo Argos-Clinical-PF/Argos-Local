@@ -114,6 +114,7 @@ resource "aws_iam_role_policy" "aplicacion" {
           Effect = "Deny"
           Action = "ssm:GetParametersByPath"
           Resource = [
+            local.ssm,
             "${local.ssm}/",
             "${local.ssm}/argos",
             "${local.ssm}/argos/salida-ia",
