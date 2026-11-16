@@ -227,6 +227,25 @@ parametros ia-proveedor BEDROCK ia-bedrock-modelo-nota "$NOTA" ia-bedrock-modelo
 correr_deploy PARAMETROS="$TMP/ssm"
 afirmar "una bandera inválida cancela sin reemplazar el bundle" cancela_sin_tocar 'copiloto-agente-habilitado debe ser true o false\.'
 
+echo "== Salida aislada de IA"
+parametros ia-proveedor BEDROCK ia-bedrock-modelo-nota "$NOTA" ia-bedrock-modelo-temas "$TEMAS"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "la salida aislada se habilita explícitamente" env_contiene 'ARGOS_IA_SALIDA_AISLADA=false'
+correr_deploy PARAMETROS="$TMP/ssm" SSM_FALLA=ia-salida-aislada
+afirmar "si falla SSM se conserva la configuración de IA vigente" cancela_sin_tocar 'no se pudo leer la activación de la salida a IA.'
+printf 'true' > "$TMP/ssm/ia-salida-aislada"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "el modo aislado exige la clave pública del autorizador" cancela_sin_tocar 'la clave pública del autorizador de IA falta o es inválida.'
+CLAVE_AUTORIZADOR_FICTICIA="$(printf '%059d' 0)"
+printf '%s' "$CLAVE_AUTORIZADOR_FICTICIA" > "$TMP/ssm/ia-autorizador-clave-publica"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "activar exige un alcance explícito" cancela_sin_tocar 'falta definir el alcance de la salida a IA.'
+printf '11111111-1111-4111-8111-111111111111' > "$TMP/ssm/ia-salida-profesionales"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "la activación y la clave llegan al backend" env_contiene 'ARGOS_IA_SALIDA_AISLADA=true'
+afirmar "la clave pública se publica en el entorno" env_contiene "ARGOS_IA_AUTORIZADOR_CLAVE_PUBLICA=$CLAVE_AUTORIZADOR_FICTICIA"
+afirmar "el alcance del canario se conserva" env_contiene 'ARGOS_IA_SALIDA_PROFESIONALES=11111111-1111-4111-8111-111111111111'
+
 echo "== Clave del índice de correo del portal"
 parametros ia-proveedor BEDROCK ia-bedrock-modelo-nota "$NOTA" ia-bedrock-modelo-temas "$TEMAS"
 correr_deploy PARAMETROS="$TMP/ssm"

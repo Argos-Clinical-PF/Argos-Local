@@ -59,6 +59,40 @@ if [ "$IA_PROVEEDOR_VALUE" != "BEDROCK" ]; then
   echo "Despliegue cancelado: $PARAM_PREFIX/ia-proveedor es '$IA_PROVEEDOR_VALUE' y debe ser BEDROCK."
   exit 78
 fi
+
+IA_AUTORIZADOR_CLAVE_PUBLICA=""
+IA_SALIDA_PROFESIONALES=""
+if ! IA_SALIDA_AISLADA="$(get_parameter ia-salida-aislada 2>&1)"; then
+  if [[ "$IA_SALIDA_AISLADA" != *ParameterNotFound* ]]; then
+    echo "Despliegue cancelado: no se pudo leer la activación de la salida a IA."
+    exit 78
+  fi
+  IA_SALIDA_AISLADA=false
+fi
+case "$IA_SALIDA_AISLADA" in
+  true)
+    if ! IA_AUTORIZADOR_CLAVE_PUBLICA="$(get_parameter ia-autorizador-clave-publica 2>/dev/null)" ||
+      [[ ! "$IA_AUTORIZADOR_CLAVE_PUBLICA" =~ ^[A-Za-z0-9_-]{59}$ ]]; then
+      echo "Despliegue cancelado: la clave pública del autorizador de IA falta o es inválida."
+      exit 78
+    fi
+    if ! IA_SALIDA_PROFESIONALES="$(get_parameter ia-salida-profesionales 2>/dev/null)"; then
+      echo "Despliegue cancelado: falta definir el alcance de la salida a IA."
+      exit 78
+    fi
+    if [ "$IA_SALIDA_PROFESIONALES" = "todos" ]; then
+      IA_SALIDA_PROFESIONALES=""
+    elif [[ ! "$IA_SALIDA_PROFESIONALES" =~ ^[0-9a-f-]{36}(,[0-9a-f-]{36})*$ ]]; then
+      echo "Despliegue cancelado: el alcance de la salida a IA es inválido."
+      exit 78
+    fi
+    ;;
+  false) ;;
+  *)
+    echo "Despliegue cancelado: ia-salida-aislada debe ser true o false."
+    exit 78
+    ;;
+esac
 MODELO_NOTA="$(get_parameter ia-bedrock-modelo-nota)" \
   || { echo "Despliegue cancelado: no se pudo leer $PARAM_PREFIX/ia-bedrock-modelo-nota."; exit 78; }
 if [ "$MODELO_NOTA" != "us.anthropic.claude-sonnet-4-6" ]; then
@@ -202,6 +236,9 @@ umask 077
   printf 'WHISPER_VAD_MIN_SILENCE_MS=250\n'
   printf 'COPILOTO_AGENTE_HABILITADO=%s\n' "$COPILOTO_HABILITADO"
   printf 'IA_PROVEEDOR=%s\n' "$IA_PROVEEDOR_VALUE"
+  printf 'ARGOS_IA_SALIDA_AISLADA=%s\n' "$IA_SALIDA_AISLADA"
+  printf 'ARGOS_IA_SALIDA_PROFESIONALES=%s\n' "$IA_SALIDA_PROFESIONALES"
+  printf 'ARGOS_IA_AUTORIZADOR_CLAVE_PUBLICA=%s\n' "$IA_AUTORIZADOR_CLAVE_PUBLICA"
   printf 'ANTHROPIC_MODEL=%s\n' "$MODELO_NOTA"
   printf 'ANTHROPIC_TOPICS_MODEL=%s\n' "$MODELO_TEMAS"
   printf 'PORTAL_EMAIL_INDEX_KEY=%s\n' "$PORTAL_EMAIL_INDEX_KEY"
