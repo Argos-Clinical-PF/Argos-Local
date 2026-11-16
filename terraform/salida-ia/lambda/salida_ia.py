@@ -1,15 +1,27 @@
+import base64
 import json
 import os
 import re
+import time
 from functools import lru_cache
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+from uuid import UUID
 
 from botocore.exceptions import ClientError, ConnectionError, ReadTimeoutError
 from botocore.config import Config
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 MAX_BYTES = 256_000
 VERSION_ANTHROPIC = "bedrock-2023-05-31"
 CAMPOS = {"max_tokens", "system", "messages", "output_config", "tools", "tool_choice", "thinking"}
 PERFILES = {"clinica": "MODELO_CLINICA", "temas": "MODELO_TEMAS"}
+PROPOSITOS = {
+    "clinica": {"GENERAL", "NOTA", "EVOLUCION", "COPILOTO_PACIENTE", "COPILOTO_SESION"},
+    "temas": {"TEMAS"},
+}
+AUTORIZADOR = "https://argosclinical.online/api/interno/ia/autorizar"
+PARAMETRO_FIRMA = "/argos/salida-ia/firma-autorizador"
 CAMPOS_BLOQUE = {
     "text": {"type", "text", "cache_control"},
     "tool_result": {"type", "tool_use_id", "content", "is_error", "cache_control"},
@@ -67,10 +79,37 @@ def mensaje_permitido(mensaje):
                                           and all(bloque_permitido(bloque, tipos) for bloque in contenido))
 
 
+def uuid_canonico(valor):
+    try:
+        return isinstance(valor, str) and str(UUID(valor)) == valor
+    except ValueError:
+        return False
+
+
+def contexto_permitido(contexto, perfil):
+    if (not isinstance(contexto, dict) or set(contexto) - {
+            "proposito", "profesional", "paciente", "sesion", "lecturas", "alcancesEvidencia"}
+            or not isinstance(contexto.get("proposito"), str) or contexto["proposito"] not in PROPOSITOS[perfil]
+            or not uuid_canonico(contexto.get("profesional"))):
+        return False
+    if any(campo in contexto and not uuid_canonico(contexto[campo]) for campo in ("paciente", "sesion")):
+        return False
+    if contexto["proposito"] == "NOTA":
+        alcances = contexto.get("alcancesEvidencia")
+        if (not isinstance(alcances, list) or len(alcances) > 2
+                or any(alcance not in ("TRANSCRIPCION_LOCAL", "ANALISIS_EMOCIONAL_VIDEO") for alcance in alcances)):
+            return False
+    elif "alcancesEvidencia" in contexto:
+        return False
+    lecturas = contexto.get("lecturas", [])
+    return isinstance(lecturas, list) and len(lecturas) <= 100 and all(uuid_canonico(id) for id in lecturas)
+
+
 def armar_solicitud(evento):
-    if (not isinstance(evento, dict) or set(evento) != {"version", "perfil", "cuerpo"}
-            or type(evento["version"]) is not int or evento["version"] != 1
-            or not isinstance(evento["perfil"], str) or evento["perfil"] not in PERFILES):
+    if (not isinstance(evento, dict) or set(evento) != {"version", "perfil", "contexto", "cuerpo"}
+            or type(evento["version"]) is not int or evento["version"] != 2
+            or not isinstance(evento["perfil"], str) or evento["perfil"] not in PERFILES
+            or not contexto_permitido(evento["contexto"], evento["perfil"])):
         return None, rechazo("SOLICITUD_INVALIDA", 400)
 
     cuerpo = evento["cuerpo"]
@@ -98,10 +137,15 @@ def armar_solicitud(evento):
     return solicitud, None
 
 
-def invocar(evento, cliente, modelos):
+def invocar(evento, cliente, modelos, autorizar):
     solicitud, error = armar_solicitud(evento)
     if error:
         return error
+    permiso = autorizar(evento["contexto"])
+    if permiso != 204:
+        if permiso == 403:
+            return rechazo("CONSENTIMIENTO_DENEGADO", 403)
+        return rechazo("AUTORIZADOR_NO_DISPONIBLE", 503)
     try:
         respuesta = cliente.invoke_model(modelId=modelos[PERFILES[evento["perfil"]]],
                                          contentType="application/json", accept="application/json",
@@ -132,5 +176,39 @@ def cliente_bedrock():
                                                         retries={"total_max_attempts": 1}))
 
 
+@lru_cache(maxsize=1)
+def clave_firma():
+    import boto3
+
+    ssm = boto3.client("ssm", config=Config(connect_timeout=2, read_timeout=2, retries={"total_max_attempts": 1}))
+    valor = ssm.get_parameter(Name=PARAMETRO_FIRMA, WithDecryption=True)["Parameter"]["Value"]
+    return Ed25519PrivateKey.from_private_bytes(base64.urlsafe_b64decode(valor + "="))
+
+
+class SinRedireccion(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def autorizar_contexto(contexto, cargar_clave=clave_firma, abrir=None):
+    try:
+        cuerpo = json.dumps(contexto, separators=(",", ":")).encode()
+        fecha = str(int(time.time()))
+        firma = cargar_clave().sign(f"argos-salida-ia-v2\n{fecha}\n".encode("ascii") + cuerpo)
+        solicitud = Request(AUTORIZADOR, data=cuerpo, headers={
+            "Content-Type": "application/json",
+            "X-Argos-Fecha": fecha,
+            "X-Argos-Firma": base64.urlsafe_b64encode(firma).decode().rstrip("="),
+        }, method="POST")
+        abrir = abrir or build_opener(SinRedireccion()).open
+        with abrir(solicitud, timeout=3) as respuesta:
+            return respuesta.status
+    except HTTPError as error:
+        error.close()
+        return error.code
+    except (URLError, TimeoutError, ValueError, ClientError, ConnectionError, ReadTimeoutError):
+        return 503
+
+
 def handler(evento, _contexto):
-    return invocar(evento, cliente_bedrock(), {clave: os.environ[clave] for clave in PERFILES.values()})
+    return invocar(evento, cliente_bedrock(), {clave: os.environ[clave] for clave in PERFILES.values()}, autorizar_contexto)
