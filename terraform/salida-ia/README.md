@@ -2,7 +2,7 @@
 
 La Lambda valida el formato y busca identificadores directos antes de llamar al proveedor. Consulta el autorizador de ARGOS por HTTPS con una firma Ed25519 y solo metadatos de alcance. El autorizador usa las reglas vigentes de consentimiento en PostgreSQL. Una denegación, un error del autorizador o una respuesta inesperada bloquean la inferencia. El mensaje enviado a Bedrock excluye los metadatos de autorización.
 
-La clave privada de firma se aprovisiona en el parámetro SecureString `/argos/salida-ia/firma-autorizador`. El rol de la Lambda lee ese parámetro. El backend recibe únicamente la clave pública en `/argos/mvp/ia-autorizador-clave-publica`. Este control separa el permiso para invocar Bedrock y la preparación del contexto. El registro de consentimiento en el backend sigue siendo una autoridad de confianza.
+La clave privada de firma se aprovisiona en el parámetro SecureString `/argos/salida-ia/firma-autorizador`. El rol de la Lambda lee ese parámetro. El rol de la EC2 tiene una denegación explícita de lectura del parámetro, de su historial y de los paths que podrían devolverlo. El backend recibe únicamente la clave pública en `/argos/mvp/ia-autorizador-clave-publica`. Este control separa el permiso para invocar Bedrock y la preparación del contexto. El registro de consentimiento en el backend sigue siendo una autoridad de confianza.
 
 ## Construcción y plan
 

@@ -2,6 +2,11 @@ locals {
   nombre = "argos-salida-ia"
   cuenta = "616322963974"
   region = "us-east-1"
+  ssm    = "arn:aws:ssm:${local.region}:${local.cuenta}:parameter"
+  firma  = "${local.ssm}/argos/salida-ia/firma-autorizador"
+
+  alias_produccion = "produccion"
+  arn_salida       = "arn:aws:lambda:${local.region}:${local.cuenta}:function:${local.nombre}:${local.alias_produccion}"
   modelos = {
     MODELO_CLINICA = "anthropic.claude-sonnet-4-6"
     MODELO_TEMAS   = "anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -53,7 +58,7 @@ resource "aws_iam_role_policy" "salida" {
       {
         Effect   = "Allow"
         Action   = "ssm:GetParameter"
-        Resource = "arn:aws:ssm:${local.region}:${local.cuenta}:parameter/argos/salida-ia/firma-autorizador"
+        Resource = local.firma
       },
       {
         Effect   = "Allow"
@@ -83,7 +88,7 @@ resource "aws_lambda_function" "salida" {
 }
 
 resource "aws_lambda_alias" "produccion" {
-  name             = "produccion"
+  name             = local.alias_produccion
   function_name    = aws_lambda_function.salida.function_name
   function_version = aws_lambda_function.salida.version
 }
@@ -94,11 +99,27 @@ resource "aws_iam_role_policy" "aplicacion" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat(
-      [{
-        Effect   = "Allow"
-        Action   = ["lambda:InvokeFunction"]
-        Resource = [aws_lambda_alias.produccion.arn]
-      }],
+      [
+        {
+          Effect   = "Allow"
+          Action   = "lambda:InvokeFunction"
+          Resource = local.arn_salida
+        },
+        {
+          Effect   = "Deny"
+          Action   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory"]
+          Resource = local.firma
+        },
+        {
+          Effect = "Deny"
+          Action = "ssm:GetParametersByPath"
+          Resource = [
+            "${local.ssm}/",
+            "${local.ssm}/argos",
+            "${local.ssm}/argos/salida-ia",
+          ]
+        },
+      ],
       [for exigir in [var.exigir_salida_aislada] : {
         Effect   = "Deny"
         Action   = ["bedrock:InvokeModel*", "bedrock:StartAsyncInvoke"]
