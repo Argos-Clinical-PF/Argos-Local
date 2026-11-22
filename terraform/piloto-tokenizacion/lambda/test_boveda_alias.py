@@ -69,6 +69,46 @@ class BovedaAliasTest(unittest.TestCase):
     def resolver(self, **cambios):
         return self.invocar("resolver", **{"proposito": "FICHA", "registros": [self.ref], **cambios})
 
+    def preparar_interno(self):
+        for tabla, campo in (("vinculos", "sujeto"), ("permisos", "huella")):
+            self.ddb.create_table(TableName=tabla, BillingMode="PAY_PER_REQUEST",
+                                  AttributeDefinitions=[{"AttributeName": campo, "AttributeType": "S"}],
+                                  KeySchema=[{"AttributeName": campo, "KeyType": "HASH"}])
+        return patch.dict(os.environ, {"IDENTIDAD_INTERNA_HABILITADA": "true",
+                          "TABLA_VINCULOS": "vinculos", "TABLA_PERMISOS_NOTA": "permisos"})
+
+    def test_servicio_interno_protege_una_cuenta_sin_registro_individual(self):
+        with self.preparar_interno():
+            nuevo = str(uuid4())
+            self.assertNotIn(nuevo, os.environ["PROFESIONALES"])
+            self.assertEqual(self.guardar(profesional=nuevo, prueba="servicio-argos")["codigo"], "OK")
+            self.assertEqual(self.resolver(profesional=nuevo, prueba="servicio-argos")["alias"][self.ref["token"]], self.alias)
+            self.assertEqual(self.resolver(profesional=self.ajeno, prueba="servicio-argos"),
+                             {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.ddb.scan(TableName="vinculos")["Count"], 0)
+
+    def test_el_marcador_interno_no_es_una_credencial_para_el_modo_anterior(self):
+        self.assertEqual(self.guardar(prueba="servicio-argos"), {"codigo": "ACCESO_DENEGADO"})
+
+    def test_permisos_internos_conservan_ambito_y_revocacion(self):
+        with self.preparar_interno():
+            self.assertEqual(self.guardar(prueba="servicio-argos")["codigo"], "OK")
+            sesion = str(uuid4())
+            autorizada = self.invocar("resolver", prueba="servicio-argos", proposito="AUTORIZAR_NOTA",
+                                      sesion=sesion, registros=[self.ref])
+            self.assertEqual(autorizada["codigo"], "OK")
+            solicitud = {"proposito": "NOTA_AUTOMATICA", "sesion": sesion,
+                         "registros": [self.ref], "permiso": autorizada["permiso"]}
+            self.assertEqual(self.invocar("resolver", **solicitud)["codigo"], "OK")
+            self.assertEqual(self.invocar("resolver", **{**solicitud, "sesion": str(uuid4())}),
+                             {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.invocar("resolver", **{**solicitud, "proposito": "PATRONES_AUTOMATICOS"}),
+                             {"codigo": "ACCESO_DENEGADO"})
+            self.ddb.put_item(TableName="vinculos", Item={"sujeto": {"S": "servicio#" + self.profesional},
+                              "profesional": {"S": self.profesional}, "activo": {"BOOL": False}})
+            self.assertEqual(self.resolver(prueba="servicio-argos"), {"codigo": "ACCESO_DENEGADO"})
+            self.assertEqual(self.invocar("resolver", **solicitud), {"codigo": "ACCESO_DENEGADO"})
+
     def test_idempotencia_y_cifrado(self):
         creada = self.guardar()
         self.assertEqual(creada["codigo"], "OK")

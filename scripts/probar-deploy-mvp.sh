@@ -94,6 +94,9 @@ correr_deploy() {
   rm -rf "$TMP/llamadas" "$TMP/paso-el-gate" "$TMP/aplicado-antes-de-aws" "$TMP/salida" "$TMP/app"
   mkdir -p "$TMP/app"
   echo "caddy del release anterior" > "$TMP/app/Caddyfile"
+  if [[ "${ARGOS_PRUEBA_PROTECCION_PREVIA:-false}" = true ]]; then
+    printf 'ARGOS_TOKENIZACION_INTERNA=true\n' > "$TMP/app/.env"
+  fi
   set +e
   env PATH="$TMP/bin:$PATH" DOBLE_DIR="$TMP" APP_DIR="$TMP/app" \
     BACKEND_TAG=sha-x FRONTEND_TAG=sha-x TRANSCRIPCION_TAG=sha-x EMOCIONES_TAG=sha-x \
@@ -277,6 +280,32 @@ parametros ia-proveedor BEDROCK ia-bedrock-modelo-nota "$NOTA" ia-bedrock-modelo
 correr_deploy PARAMETROS="$TMP/ssm"
 afirmar "con solo índice y sin clave cancela el despliegue" \
   cancela_sin_tocar 'el modo solo índice exige la clave de correo del portal\.'
+
+echo "== Tokenización interna"
+parametros ia-proveedor BEDROCK ia-bedrock-modelo-nota "$NOTA" ia-bedrock-modelo-temas "$TEMAS"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "el modo interno requiere activación explícita" env_contiene 'ARGOS_TOKENIZACION_INTERNA=false'
+ARGOS_PRUEBA_PROTECCION_PREVIA=true correr_deploy PARAMETROS="$TMP/ssm"
+proteccion_previa_conservada() {
+  codigo_es 78 && salida_contiene 'el modo interno activo no puede deshabilitarse' && no_llamo_compose &&
+    grep -qx 'caddy del release anterior' "$TMP/app/Caddyfile" &&
+    [ "$(cat "$TMP/app/.env")" = 'ARGOS_TOKENIZACION_INTERNA=true' ]
+}
+afirmar "un parámetro perdido no desactiva un modo interno ya activo" proteccion_previa_conservada
+correr_deploy PARAMETROS="$TMP/ssm" SSM_FALLA=tokenizacion-interna
+afirmar "si falla SSM no desactiva la protección interna" cancela_sin_tocar 'no se pudo leer /argos/mvp/tokenizacion-interna\.'
+printf 'true' > "$TMP/ssm/tokenizacion-interna"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "el modo interno no requiere un cliente Cognito ni una lista de cuentas" env_contiene 'ARGOS_TOKENIZACION_INTERNA=true'
+printf 'true' > "$TMP/ssm/tokenizacion-migracion"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "la migración automática se habilita por separado" env_contiene 'ARGOS_TOKENIZACION_MIGRACION=true'
+printf 'false' > "$TMP/ssm/tokenizacion-interna"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "no inicia una migración sin modo interno" cancela_sin_tocar 'La migración automática requiere tokenización interna'
+printf 'invalida' > "$TMP/ssm/tokenizacion-interna"
+correr_deploy PARAMETROS="$TMP/ssm"
+afirmar "rechaza un modo interno inválido" cancela_sin_tocar 'Configuración inválida de tokenización interna'
 
 echo "== Vigía de contenedores unhealthy"
 # El vigía se instala desde un heredoc de deploy-mvp.sh; se extrae tal cual y solo se cambia el

@@ -46,6 +46,18 @@ get_parameter_optional() {
     --output text 2>/dev/null || true
 }
 
+get_parameter_config() {
+  local valor
+  if ! valor="$(get_parameter "$1" 2>&1)"; then
+    if [[ "$valor" != *ParameterNotFound* ]]; then
+      echo "Despliegue cancelado: no se pudo leer $PARAM_PREFIX/$1." >&2
+      return 78
+    fi
+    valor=""
+  fi
+  printf '%s' "$valor"
+}
+
 COPILOTO_HABILITADO="$(get_parameter_optional copiloto-agente-habilitado)"
 COPILOTO_HABILITADO="${COPILOTO_HABILITADO:-false}"
 if [ "$COPILOTO_HABILITADO" != "true" ] && [ "$COPILOTO_HABILITADO" != "false" ]; then
@@ -133,6 +145,37 @@ if [[ "$PORTAL_EMAIL_SOLO_INDICE" == true && -z "$PORTAL_EMAIL_INDEX_KEY" ]]; th
   exit 78
 fi
 
+TOKENIZACION_COGNITO="$(get_parameter_optional tokenizacion-cliente-cognito)"
+TOKENIZACION_PROFESIONALES="$(get_parameter_optional tokenizacion-profesionales)"
+TOKENIZACION_INTERNA="$(get_parameter_config tokenizacion-interna)"
+if [[ "$TOKENIZACION_INTERNA" != true && -f "$APP_DIR/.env" ]] &&
+    grep -Fxq 'ARGOS_TOKENIZACION_INTERNA=true' "$APP_DIR/.env"; then
+  echo "Despliegue cancelado: el modo interno activo no puede deshabilitarse mediante este despliegue."
+  exit 78
+fi
+TOKENIZACION_INTERNA="${TOKENIZACION_INTERNA:-false}"
+TOKENIZACION_MIGRACION="$(get_parameter_config tokenizacion-migracion)"
+TOKENIZACION_MIGRACION="${TOKENIZACION_MIGRACION:-false}"
+if [[ ! "$TOKENIZACION_INTERNA" =~ ^(true|false)$ || ! "$TOKENIZACION_MIGRACION" =~ ^(true|false)$ ]]; then
+  echo "Despliegue cancelado: Configuración inválida de tokenización interna."
+  exit 78
+fi
+if [[ "$TOKENIZACION_MIGRACION" = true && "$TOKENIZACION_INTERNA" != true ]]; then
+  echo "Despliegue cancelado: La migración automática requiere tokenización interna."
+  exit 78
+fi
+TOKENIZACION_PERFIL=""
+if [[ "$TOKENIZACION_INTERNA" = true ]]; then
+  TOKENIZACION_PERFIL="tokenizacion-produccion"
+elif [[ -n "$TOKENIZACION_COGNITO" || -n "$TOKENIZACION_PROFESIONALES" ]]; then
+  if [[ ! "$TOKENIZACION_COGNITO" =~ ^[a-z0-9]{1,128}$ || ! "$TOKENIZACION_PROFESIONALES" =~ ^[0-9a-f-]{36}(,[0-9a-f-]{36})*$ ]]; then
+    echo "Configuración incompleta o inválida de tokenización."
+    exit 1
+  fi
+  TOKENIZACION_PERFIL="tokenizacion-produccion"
+fi
+
+
 # El workflow deja el bundle nuevo en entrante/ y recién acá, pasado el gate, reemplaza los archivos
 # de la app: un deploy cancelado no deja un Caddyfile o un compose sin desplegar que el próximo
 # arranque del gateway o un restaurar-respaldo.sh tomarían con el .env viejo.
@@ -163,16 +206,6 @@ ESPERA_ASIGNACION_HORAS="${ESPERA_ASIGNACION_HORAS:-24}"
 RASTREO_HABILITADO="$(get_parameter_optional emociones-rastreo-habilitado)"
 RASTREO_HABILITADO="${RASTREO_HABILITADO:-false}"
 RASTREO_PILOTO="$(get_parameter_optional emociones-rastreo-piloto)"
-TOKENIZACION_COGNITO="$(get_parameter_optional tokenizacion-cliente-cognito)"
-TOKENIZACION_PROFESIONALES="$(get_parameter_optional tokenizacion-profesionales)"
-TOKENIZACION_PERFIL=""
-if [[ -n "$TOKENIZACION_COGNITO" || -n "$TOKENIZACION_PROFESIONALES" ]]; then
-  if [[ ! "$TOKENIZACION_COGNITO" =~ ^[a-z0-9]{1,128}$ || ! "$TOKENIZACION_PROFESIONALES" =~ ^[0-9a-f-]{36}(,[0-9a-f-]{36})*$ ]]; then
-    echo "Configuración incompleta o inválida de tokenización."
-    exit 1
-  fi
-  TOKENIZACION_PERFIL="tokenizacion-produccion"
-fi
 
 umask 077
 {
@@ -279,6 +312,8 @@ umask 077
   printf 'ARGOS_TOKENIZACION_PERFIL=%s\n' "$TOKENIZACION_PERFIL"
   printf 'ARGOS_TOKENIZACION_CLIENTE_COGNITO=%s\n' "$TOKENIZACION_COGNITO"
   printf 'ARGOS_TOKENIZACION_PROFESIONALES=%s\n' "$TOKENIZACION_PROFESIONALES"
+  printf 'ARGOS_TOKENIZACION_INTERNA=%s\n' "$TOKENIZACION_INTERNA"
+  printf 'ARGOS_TOKENIZACION_MIGRACION=%s\n' "$TOKENIZACION_MIGRACION"
   # Mercado Pago producción (ARGOS-256): credenciales de SSM y variables de pasarela
   printf 'MERCADOPAGO_ACCESS_TOKEN=%s\n' "$(get_parameter_optional mercadopago-access-token)"
   printf 'MERCADOPAGO_WEBHOOK_SECRET=%s\n' "$(get_parameter_optional mercadopago-webhook-secret)"
