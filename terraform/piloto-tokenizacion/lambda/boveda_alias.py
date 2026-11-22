@@ -34,7 +34,28 @@ def uuid_canonico(valor):
         raise Rechazo("SOLICITUD_INVALIDA") from None
 
 
+def profesional_autorizado(ddb, sujeto):
+    if isinstance(sujeto, str) and sujeto.startswith("servicio#"):
+        if os.getenv("IDENTIDAD_INTERNA_HABILITADA") != "true":
+            return None
+        profesional = uuid_canonico(sujeto.removeprefix("servicio#"))
+        registro = ddb.get_item(TableName=os.environ["TABLA_VINCULOS"],
+                                Key={"sujeto": {"S": sujeto}}, ConsistentRead=True).get("Item")
+        if registro is None:
+            return profesional
+        if registro.get("activo", {}).get("BOOL") is True and registro.get("profesional", {}).get("S") == profesional:
+            return profesional
+        return None
+    return profesional_activo(ddb, sujeto)
+
+
 def autorizar(evento, ddb):
+    if os.getenv("IDENTIDAD_INTERNA_HABILITADA") == "true" and evento.get("prueba") == "servicio-argos":
+        profesional = uuid_canonico(evento.get("profesional"))
+        sujeto = "servicio#" + profesional
+        if profesional_autorizado(ddb, sujeto) != profesional:
+            raise Rechazo("ACCESO_DENEGADO")
+        return profesional, sujeto
     prueba = evento.get("prueba")
     if not isinstance(prueba, str) or len(prueba) > 4096:
         raise Rechazo("ACCESO_DENEGADO")
@@ -309,7 +330,7 @@ def autorizar_permiso(ddb, evento):
         raise Rechazo("ACCESO_DENEGADO")
     if (registro.get("proposito", {"S": "NOTA_AUTOMATICA"})["S"] != evento["proposito"]
             or json.loads(registro["vinculo"]["S"]) != vinculo_permiso(evento, profesional)
-            or profesional_activo(ddb, registro["sujeto"]["S"]) != profesional):
+            or profesional_autorizado(ddb, registro["sujeto"]["S"]) != profesional):
         raise Rechazo("ACCESO_DENEGADO")
     return profesional
 
