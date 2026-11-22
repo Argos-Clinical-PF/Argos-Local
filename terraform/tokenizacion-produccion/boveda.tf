@@ -212,20 +212,21 @@ resource "aws_lambda_function" "boveda" {
 
   environment {
     variables = {
-      OPERACION           = each.key
-      ENTORNO_BOVEDA      = local.prefijo
-      AUDITORIA_DIAS      = "90"
-      COGNITO_EMISOR      = "https://cognito-idp.us-east-1.amazonaws.com/${aws_cognito_user_pool.profesionales.id}"
-      COGNITO_CLIENTE     = aws_cognito_user_pool_client.profesionales.id
-      COGNITO_AUDIENCIA   = local.audiencia
-      COGNITO_ALCANCE     = "${local.audiencia}/alias"
-      TABLA_VINCULOS      = aws_dynamodb_table.boveda["vinculos"].name
-      TABLA_PERMISOS_NOTA = aws_dynamodb_table.boveda["permisos"].name
-      CLAVE_CIFRADO       = aws_kms_key.boveda["cifrado"].arn
-      CLAVE_HUELLA        = aws_kms_key.boveda["huella"].arn
-      TABLA_BOVEDA        = aws_dynamodb_table.boveda["boveda"].name
-      TABLA_BAJAS         = aws_dynamodb_table.boveda["bajas"].name
-      TABLA_AUDITORIA     = aws_dynamodb_table.boveda["auditoria"].name
+      IDENTIDAD_INTERNA_HABILITADA = "true"
+      OPERACION                    = each.key
+      ENTORNO_BOVEDA               = local.prefijo
+      AUDITORIA_DIAS               = "90"
+      COGNITO_EMISOR               = "https://cognito-idp.us-east-1.amazonaws.com/${aws_cognito_user_pool.profesionales.id}"
+      COGNITO_CLIENTE              = aws_cognito_user_pool_client.profesionales.id
+      COGNITO_AUDIENCIA            = local.audiencia
+      COGNITO_ALCANCE              = "${local.audiencia}/alias"
+      TABLA_VINCULOS               = aws_dynamodb_table.boveda["vinculos"].name
+      TABLA_PERMISOS_NOTA          = aws_dynamodb_table.boveda["permisos"].name
+      CLAVE_CIFRADO                = aws_kms_key.boveda["cifrado"].arn
+      CLAVE_HUELLA                 = aws_kms_key.boveda["huella"].arn
+      TABLA_BOVEDA                 = aws_dynamodb_table.boveda["boveda"].name
+      TABLA_BAJAS                  = aws_dynamodb_table.boveda["bajas"].name
+      TABLA_AUDITORIA              = aws_dynamodb_table.boveda["auditoria"].name
     }
   }
 

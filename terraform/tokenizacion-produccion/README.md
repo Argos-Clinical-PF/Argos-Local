@@ -14,7 +14,15 @@ terraform validate
 terraform plan -var administrador_boveda=ARN_DEL_ADMINISTRADOR -out=boveda-produccion.tfplan
 ```
 
-## Alta y baja de acceso
+## Modo interno automático
+
+El ADR-047 prepara la transición a un servicio interno. La revisión de Lambda acepta el contrato `servicio-argos` solo cuando `IDENTIDAD_INTERNA_HABILITADA=true`; ese marcador no es una credencial. AWS IAM autentica al invocador y el backend autoriza al profesional con la sesión normal de ARGOS. El UUID informado por el backend es una afirmación de esa autoridad, no una prueba de identidad independiente. La función verifica el ámbito del registro, propósito, bajas y límites.
+
+Con `/argos/mvp/tokenizacion-interna=true`, el backend usa el perfil de producción para todas las cuentas y desactiva el login adicional. `/argos/mvp/tokenizacion-migracion=true` habilita por separado los lotes automáticos de registros existentes. Ambos parámetros se activan después de publicar las versiones compatibles y validar dos usuarios ficticios. No se necesita crear sujetos de Cognito ni vínculos individuales. Un registro administrativo `servicio#UUID_PROFESIONAL` con `activo=false` bloquea ese ámbito inmediatamente en la bóveda y en sus permisos.
+
+Durante la transición se conservan los contratos anteriores y Cognito. Después de migrar nuevas cuentas, pausar la migración manteniendo el modo interno y una versión compatible; una imagen anterior que exija la segunda sesión no constituye una reversión válida. El resto de este documento describe los controles vigentes y el procedimiento anterior de Cognito, conservado para compatibilidad.
+
+## Alta y baja de acceso del modo anterior
 
 Crear la identidad en Cognito mediante alta administrada y completar la verificación de titularidad. Vincular el `sub` verificado con el UUID del profesional en `argos-boveda-produccion-vinculos` mediante una escritura condicional que rechace un vínculo previo. Para revocar, establecer `activo=false` con condición sobre el UUID esperado y deshabilitar la cuenta en Cognito. La bóveda lee el vínculo con consistencia fuerte en cada invocación, también cuando un trabajador usa un permiso de nota vigente.
 
